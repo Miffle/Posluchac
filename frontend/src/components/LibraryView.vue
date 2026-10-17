@@ -9,6 +9,9 @@ import {
   DeleteLibraryTrack
 } from '../../wailsjs/go/main/App'
 import { usePlayerStore } from '../store/player'
+import { usePlaylistsStore } from '../store/playlists'
+import { useDialogStore } from '../store/dialog'
+import AddToPlaylistModal from './AddToPlaylistModal.vue'
 
 interface Track {
   id: number
@@ -50,6 +53,30 @@ const selectedArtistName = ref('')
 const loading = ref(false)
 
 const player = usePlayerStore()
+const playlistsStore = usePlaylistsStore()
+const dialog = useDialogStore()
+const trackForPlaylist = ref<Track | null>(null)
+
+function openAddToPlaylist(t: Track) {
+  playlistsStore.loadPlaylists()
+  trackForPlaylist.value = t
+}
+
+function isTrackActive(t: Track): boolean {
+  return player.status.track?.filePath === t.filePath
+}
+
+function isTrackPlaying(t: Track): boolean {
+  return isTrackActive(t) && player.isPlaying
+}
+
+function handleTrackPlayClick(t: Track, list?: Track[]) {
+  if (isTrackActive(t)) {
+    player.togglePause()
+  } else {
+    playTrackInQueue(t, list)
+  }
+}
 
 async function loadTracks() {
   loading.value = true
@@ -79,18 +106,29 @@ async function refreshLibrary() {
 }
 
 async function deleteTrack(t: Track) {
-  const confirmed = confirm(`Удалить трек "${t.title || t.fileName}"?\n\nФайл будет удален из библиотеки и с диска.`)
+  const confirmed = await dialog.confirm({
+    title: 'Удаление трека',
+    message: `Удалить трек «${t.title || t.fileName}»?`,
+    details: 'Файл будет удален из библиотеки и с диска.',
+    confirmText: 'Удалить',
+    danger: true
+  })
   if (!confirmed) return
 
   try {
     await DeleteLibraryTrack(t.id, true)
     await loadTracks()
   } catch (e: any) {
-    alert('Ошибка при удалении: ' + (e?.message || e))
+    await dialog.alert({
+      title: 'Ошибка при удалении',
+      message: e?.message || String(e),
+      type: 'error'
+    })
   }
 }
 
 onMounted(async () => {
+  playlistsStore.loadPlaylists()
   await ScanLibrary()
   await loadTracks()
 })
@@ -105,7 +143,10 @@ function playTrackInQueue(t: Track, list?: Track[]) {
   const queue = source.map(item => ({
     infoHash: item.infoHash,
     filePath: item.filePath,
-    fileName: item.title || item.fileName,
+    fileName: item.fileName,
+    title: item.title,
+    artist: item.artist,
+    album: item.album,
     coverPath: item.coverPath
   }))
   player.play(t.infoHash, t.filePath, queue)
@@ -259,9 +300,14 @@ watch(filteredArtists, (newArtists) => {
           <button :class="['tab', { active: tab === 'favourites' }]" @click="setTab('favourites')">❤️ Избранное</button>
         </div>
       </div>
-      <button class="btn btn-ghost btn-sm scan-btn" @click="refreshLibrary" title="Просканировать папку музыки на новые файлы">
-        🔄 Обновить папку
-      </button>
+      <div class="header-right">
+        <div class="toast-pill" v-if="playlistsStore.toastMessage">
+          {{ playlistsStore.toastMessage }}
+        </div>
+        <button class="btn btn-ghost btn-sm scan-btn" @click="refreshLibrary" title="Просканировать папку музыки на новые файлы">
+          🔄 Обновить папку
+        </button>
+      </div>
     </div>
 
     <div class="search-row">
@@ -384,12 +430,17 @@ watch(filteredArtists, (newArtists) => {
                 v-for="(t, idx) in album.tracks"
                 :key="t.id"
                 class="track-row album-row"
-                @dblclick="playTrackInQueue(t, selectedArtist.tracks)"
-                :class="{ playing: player.status.track?.filePath === t.filePath }"
+                @dblclick="handleTrackPlayClick(t, selectedArtist.tracks)"
+                :class="{ playing: isTrackActive(t) }"
               >
                 <span class="track-num">{{ idx + 1 }}</span>
-                <button class="fav-btn" @click.stop="toggleFav(t)" :title="t.favourite ? 'Убрать из избранного' : 'В избранное'">
-                  {{ t.favourite ? '❤️' : '🤍' }}
+                <button
+                  class="play-btn"
+                  :class="{ 'is-playing': isTrackPlaying(t) }"
+                  @click.stop="handleTrackPlayClick(t, selectedArtist.tracks)"
+                  :title="isTrackPlaying(t) ? 'Пауза' : 'Воспроизвести'"
+                >
+                  {{ isTrackPlaying(t) ? '⏸' : '▶' }}
                 </button>
                 <div class="track-info">
                   <div class="track-title">{{ t.title || t.fileName }}</div>
@@ -397,7 +448,15 @@ watch(filteredArtists, (newArtists) => {
                 <div class="track-genre" v-if="t.genre">{{ t.genre }}</div>
                 <div class="track-duration">{{ formatDuration(t.durationSec) }}</div>
                 <div class="track-actions">
-                  <button class="play-btn" @click.stop="playTrackInQueue(t, selectedArtist.tracks)">▶</button>
+                  <button
+                    class="fav-btn"
+                    :class="{ active: t.favourite }"
+                    @click.stop="toggleFav(t)"
+                    :title="t.favourite ? 'Убрать из избранного' : 'В избранное'"
+                  >
+                    {{ t.favourite ? '❤️' : '🤍' }}
+                  </button>
+                  <button class="action-btn playlist-btn" @click.stop="openAddToPlaylist(t)" title="Добавить в плейлист">📋+</button>
                   <button class="del-btn" @click.stop="deleteTrack(t)" title="Удалить трек">🗑</button>
                 </div>
               </div>
@@ -426,12 +485,17 @@ watch(filteredArtists, (newArtists) => {
           class="track-row flat-row"
           v-for="(t, idx) in tracks"
           :key="t.id"
-          @dblclick="playTrackInQueue(t)"
-          :class="{ playing: player.status.track?.filePath === t.filePath }"
+          @dblclick="handleTrackPlayClick(t)"
+          :class="{ playing: isTrackActive(t) }"
         >
           <span class="track-num">{{ idx + 1 }}</span>
-          <button class="fav-btn" @click.stop="toggleFav(t)" :title="t.favourite ? 'Убрать из избранного' : 'В избранное'">
-            {{ t.favourite ? '❤️' : '🤍' }}
+          <button
+            class="play-btn"
+            :class="{ 'is-playing': isTrackPlaying(t) }"
+            @click.stop="handleTrackPlayClick(t)"
+            :title="isTrackPlaying(t) ? 'Пауза' : 'Воспроизвести'"
+          >
+            {{ isTrackPlaying(t) ? '⏸' : '▶' }}
           </button>
           <div class="track-cover-thumb-box">
             <img
@@ -454,12 +518,26 @@ watch(filteredArtists, (newArtists) => {
           <div class="track-genre" v-if="t.genre">{{ t.genre }}</div>
           <div class="track-duration">{{ formatDuration(t.durationSec) }}</div>
           <div class="track-actions">
-            <button class="play-btn" @click.stop="playTrackInQueue(t)">▶</button>
+            <button
+              class="fav-btn"
+              :class="{ active: t.favourite }"
+              @click.stop="toggleFav(t)"
+              :title="t.favourite ? 'Убрать из избранного' : 'В избранное'"
+            >
+              {{ t.favourite ? '❤️' : '🤍' }}
+            </button>
+            <button class="action-btn playlist-btn" @click.stop="openAddToPlaylist(t)" title="Добавить в плейлист">📋+</button>
             <button class="del-btn" @click.stop="deleteTrack(t)" title="Удалить трек">🗑</button>
           </div>
         </div>
       </div>
     </div>
+
+    <!-- Modal for adding track to playlist -->
+    <AddToPlaylistModal
+      :track="trackForPlaylist"
+      @close="trackForPlaylist = null"
+    />
   </div>
 </template>
 
@@ -468,8 +546,24 @@ watch(filteredArtists, (newArtists) => {
 
 .view-header { display: flex; justify-content: space-between; align-items: center; }
 .header-left { display: flex; align-items: center; gap: 20px; }
+.header-right { display: flex; align-items: center; gap: 12px; }
 .view-header h1 { font-size: 24px; font-weight: 700; }
 .scan-btn { display: flex; align-items: center; gap: 6px; }
+
+.toast-pill {
+  background: var(--accent);
+  color: #000;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 12px;
+  animation: toast-in 0.15s ease-out;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .tabs { display: flex; gap: 6px; }
 .tab { padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; color: var(--text2); background: var(--surface); transition: all 0.12s; }
@@ -515,12 +609,12 @@ watch(filteredArtists, (newArtists) => {
 
 /* Flat row in All Tracks / Favourites */
 .flat-row {
-  grid-template-columns: 28px auto 36px 1fr auto auto auto;
+  grid-template-columns: 28px 28px 36px 1fr auto auto auto;
 }
 
 /* Album row inside artist discography */
 .album-row {
-  grid-template-columns: 28px auto 1fr auto auto auto;
+  grid-template-columns: 28px 28px 1fr auto auto auto;
 }
 
 .track-num {
@@ -551,8 +645,7 @@ watch(filteredArtists, (newArtists) => {
   opacity: 0.7;
 }
 
-.fav-btn { font-size: 14px; opacity: 0.4; transition: opacity 0.1s; flex-shrink: 0; }
-.track-row:hover .fav-btn, .fav-btn:hover { opacity: 1; }
+
 
 .track-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .track-title {
@@ -587,15 +680,58 @@ watch(filteredArtists, (newArtists) => {
 }
 .track-duration { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; }
 
-.track-actions { display: flex; align-items: center; gap: 8px; }
-
 .play-btn {
-  font-size: 12px; padding: 4px 12px;
-  background: var(--accent); color: #000;
-  border-radius: 12px; font-weight: 700;
-  opacity: 0; transition: opacity 0.1s;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  opacity: 0;
+  transition: opacity 0.12s, transform 0.12s;
+  flex-shrink: 0;
+  border: none;
+  cursor: pointer;
+  padding: 0;
 }
 .track-row:hover .play-btn { opacity: 1; }
+.track-row.playing .play-btn { opacity: 1; }
+.play-btn:hover { transform: scale(1.12); }
+
+.track-actions { display: flex; align-items: center; gap: 8px; }
+
+.fav-btn {
+  font-size: 14px;
+  opacity: 0;
+  padding: 4px;
+  border-radius: 6px;
+  transition: opacity 0.1s, transform 0.1s;
+  background: transparent;
+  cursor: pointer;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.track-row:hover .fav-btn { opacity: 0.7; }
+.fav-btn:hover { opacity: 1 !important; transform: scale(1.15); }
+.fav-btn.active { opacity: 1 !important; }
+
+.playlist-btn {
+  font-size: 13px;
+  opacity: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: opacity 0.1s, background 0.1s;
+  background: transparent;
+  color: var(--text2);
+}
+.track-row:hover .playlist-btn { opacity: 0.8; }
+.playlist-btn:hover { opacity: 1 !important; color: var(--accent); background: var(--bg3); }
 
 .del-btn {
   font-size: 14px; opacity: 0; padding: 4px; border-radius: 6px;

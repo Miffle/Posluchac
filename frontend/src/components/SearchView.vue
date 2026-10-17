@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, inject } from 'vue'
 import {
   Search,
   AddSource,
@@ -10,6 +10,9 @@ import {
 } from '../../wailsjs/go/main/App'
 import { useDownloadsStore, type TorrentFile } from '../store/downloads'
 import { usePlayerStore } from '../store/player'
+import { useDialogStore } from '../store/dialog'
+
+const navigate = inject<(view: string) => void>('navigate', () => {})
 
 interface SearchResult {
   title: string
@@ -71,6 +74,7 @@ const collapsedFolders = ref<Record<string, boolean>>({})
 
 const downloadsStore = useDownloadsStore()
 const playerStore = usePlayerStore()
+const dialog = useDialogStore()
 
 onMounted(async () => {
   await loadSources()
@@ -101,7 +105,13 @@ async function addSourceHandler() {
 }
 
 async function removeSourceHandler(id: number) {
-  if (!confirm('Удалить этот источник?')) return
+  const ok = await dialog.confirm({
+    title: 'Удаление источника',
+    message: 'Удалить этот источник поиска?',
+    confirmText: 'Удалить',
+    danger: true
+  })
+  if (!ok) return
   await DeleteSource(id)
   await loadSources()
 }
@@ -152,7 +162,11 @@ async function openFileSelector(result: SearchResult) {
     collapsedFolders.value = {}
   } catch (e: any) {
     showFileModal.value = false
-    alert('Не удалось получить список файлов раздачи: ' + (e?.message || e))
+    await dialog.alert({
+      title: 'Ошибка получения файлов',
+      message: 'Не удалось получить список файлов раздачи: ' + (e?.message || e),
+      type: 'error'
+    })
   } finally {
     loadingFiles.value = false
   }
@@ -172,9 +186,13 @@ async function addMagnetManual() {
     await downloadsStore.addMagnet(magnetUri.value.trim())
     magnetUri.value = ''
     showMagnetInput.value = false
-    alert('Торрент добавлен!')
+    dialog.toast('Торрент успешно добавлен в загрузки!', 'success')
   } catch (e: any) {
-    alert('Ошибка: ' + (e?.message || e))
+    await dialog.alert({
+      title: 'Ошибка добавления торрента',
+      message: e?.message || String(e),
+      type: 'error'
+    })
   }
 }
 
@@ -383,7 +401,7 @@ async function confirmDownloadSelected() {
   )
 
   if (chosenPaths.size === 0) {
-    alert('Выберите хотя бы один файл для скачивания!')
+    dialog.toast('Выберите хотя бы один файл для скачивания', 'warning')
     return
   }
 
@@ -398,26 +416,44 @@ async function confirmDownloadSelected() {
   }
 
   const paths = Array.from(chosenPaths)
+  const hash = pendingInfoHash.value
+  if (!hash) {
+    dialog.toast('Ошибка: хэш торрента не найден', 'error')
+    return
+  }
+
   try {
-    const hash = pendingInfoHash.value
     pendingInfoHash.value = ''
     showFileModal.value = false
     await downloadsStore.downloadSelectedFiles(hash, paths)
-    alert(`Загрузка начата! Выбрано файлов: ${paths.length}`)
+    dialog.toast(`Загрузка начата! Выбрано файлов: ${paths.length}`, 'success')
   } catch (e: any) {
-    alert('Ошибка запуска загрузки: ' + (e?.message || e))
+    await dialog.alert({
+      title: 'Ошибка запуска загрузки',
+      message: e?.message || String(e),
+      type: 'error'
+    })
   }
 }
 
 async function confirmDownloadAll() {
+  const hash = pendingInfoHash.value
+  if (!hash) {
+    dialog.toast('Ошибка: хэш торрента не найден', 'error')
+    return
+  }
+
   try {
-    const hash = pendingInfoHash.value
     pendingInfoHash.value = ''
     showFileModal.value = false
     await downloadsStore.downloadSelectedFiles(hash, [])
-    alert('Загрузка всех файлов раздачи начата!')
+    dialog.toast('Загрузка всех файлов раздачи начата!', 'success')
   } catch (e: any) {
-    alert('Ошибка: ' + (e?.message || e))
+    await dialog.alert({
+      title: 'Ошибка запуска загрузки',
+      message: e?.message || String(e),
+      type: 'error'
+    })
   }
 }
 
@@ -425,7 +461,11 @@ async function streamTrack(file: TorrentFile) {
   try {
     await PlayTrack(pendingInfoHash.value, file.path)
   } catch (e: any) {
-    alert('Ошибка воспроизведения: ' + (e?.message || e))
+    await dialog.alert({
+      title: 'Ошибка воспроизведения',
+      message: e?.message || String(e),
+      type: 'error'
+    })
   }
 }
 

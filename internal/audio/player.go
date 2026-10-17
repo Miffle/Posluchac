@@ -41,6 +41,9 @@ type TrackInfo struct {
 	InfoHash  string `json:"infoHash"`
 	FilePath  string `json:"filePath"`
 	FileName  string `json:"fileName"`
+	Title     string `json:"title,omitempty"`
+	Artist    string `json:"artist,omitempty"`
+	Album     string `json:"album,omitempty"`
 	CoverPath string `json:"coverPath,omitempty"`
 }
 

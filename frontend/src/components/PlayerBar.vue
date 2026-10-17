@@ -43,7 +43,29 @@ const volumeIcon = computed(() => {
   return '🔊'
 })
 
-const trackName = computed(() => s.value.track?.fileName ?? '')
+const displayTitle = computed(() => {
+  if (s.value.track?.title) return s.value.track.title
+  if (player.currentQueueTrack?.title) return player.currentQueueTrack.title
+  const fn = s.value.track?.fileName || player.currentQueueTrack?.fileName || ''
+  if (!fn) return 'Нет трека'
+  const nameWithoutExt = fn.replace(/\.[^/.]+$/, '')
+  if (nameWithoutExt.includes(' - ')) {
+    return nameWithoutExt.split(' - ').slice(1).join(' - ').trim()
+  }
+  return nameWithoutExt
+})
+
+const displayArtist = computed(() => {
+  if (s.value.track?.artist) return s.value.track.artist
+  if (player.currentQueueTrack?.artist) return player.currentQueueTrack.artist
+  const fn = s.value.track?.fileName || player.currentQueueTrack?.fileName || ''
+  if (!fn) return ''
+  const nameWithoutExt = fn.replace(/\.[^/.]+$/, '')
+  if (nameWithoutExt.includes(' - ')) {
+    return nameWithoutExt.split(' - ')[0].trim()
+  }
+  return ''
+})
 
 const volumePercent = computed(() => {
   const v = s.value.volume ?? 0.8
@@ -76,8 +98,9 @@ function toggleMute() {
         <div v-else class="track-icon">🎵</div>
       </div>
       <div class="track-meta">
-        <div class="track-name" :title="trackName">{{ trackName || 'Нет трека' }}</div>
-        <div class="track-sub">
+        <div class="track-name" :title="displayTitle">{{ displayTitle }}</div>
+        <div class="track-artist" v-if="displayArtist" :title="displayArtist">{{ displayArtist }}</div>
+        <div class="track-sub" v-else>
           <span v-if="s.state === 'playing'" class="state-indicator playing">▶ Играет</span>
           <span v-else-if="s.state === 'paused'" class="state-indicator paused">⏸ Пауза</span>
           <span v-else class="state-indicator stopped">Остановлен</span>
@@ -213,6 +236,7 @@ function toggleMute() {
 .track-icon { font-size: 26px; }
 .track-meta { min-width: 0; }
 .track-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.track-artist { font-size: 12px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
 .track-sub  { font-size: 12px; color: var(--text2); margin-top: 2px; }
 .state-indicator.playing { color: var(--accent); }
 .state-indicator.paused { color: #ff9800; }

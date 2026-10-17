@@ -25,6 +25,9 @@ export interface DownloadProgress {
   uploadSpeed: number
   seeders: number
   state: string
+  addedAt?: number
+  selectedCount?: number
+  selectedTrack?: string
 }
 
 export interface TorrentFile {
@@ -49,7 +52,17 @@ export const useDownloadsStore = defineStore('downloads', () => {
   const files = ref<Record<string, TorrentFile[]>>({}) // infoHash → files
   let pollInterval: ReturnType<typeof setInterval> | null = null
 
+  async function refreshProgress() {
+    try {
+      const progress = await GetProgress()
+      downloads.value = (progress || []) as DownloadProgress[]
+    } catch { /* ignore */ }
+  }
+
   function startPolling() {
+    // Initial fetch immediately
+    refreshProgress()
+
     pollInterval = setInterval(async () => {
       try {
         const progress = await GetProgress()
@@ -70,11 +83,15 @@ export const useDownloadsStore = defineStore('downloads', () => {
   }
 
   async function addMagnet(uri: string) {
-    return await AddMagnet(uri)
+    const res = await AddMagnet(uri)
+    await refreshProgress()
+    return res
   }
 
   async function addFromResult(result: any) {
-    return await AddFromResult(result)
+    const res = await AddFromResult(result)
+    await refreshProgress()
+    return res
   }
 
   async function addFromResultPending(result: any): Promise<PendingTorrent> {
@@ -83,7 +100,9 @@ export const useDownloadsStore = defineStore('downloads', () => {
   }
 
   async function downloadSelectedFiles(infoHash: string, selectedPaths: string[]) {
-    return await DownloadSelectedFiles(infoHash, selectedPaths)
+    const res = await DownloadSelectedFiles(infoHash, selectedPaths)
+    await refreshProgress()
+    return res
   }
 
   async function pause(infoHash: string) {
@@ -124,6 +143,7 @@ export const useDownloadsStore = defineStore('downloads', () => {
   return {
     downloads,
     files,
+    refreshProgress,
     startPolling,
     stopPolling,
     addMagnet,

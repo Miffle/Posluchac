@@ -86,6 +86,10 @@ export function GetPlaylistTracks(arg1) {
   return window['go']['main']['App']['GetPlaylistTracks'](arg1);
 }
 
+export function GetPlaylistsForTrack(arg1) {
+  return window['go']['main']['App']['GetPlaylistsForTrack'](arg1);
+}
+
 export function GetProgress() {
   return window['go']['main']['App']['GetProgress']();
 }
@@ -136,6 +140,10 @@ export function PauseTorrent(arg1) {
 
 export function PlayTrack(arg1, arg2) {
   return window['go']['main']['App']['PlayTrack'](arg1, arg2);
+}
+
+export function RemoveFromPlaylist(arg1, arg2) {
+  return window['go']['main']['App']['RemoveFromPlaylist'](arg1, arg2);
 }
 
 export function RemoveTorrent(arg1, arg2) {

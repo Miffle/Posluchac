@@ -7,12 +7,22 @@ import PlayerBar from './components/PlayerBar.vue'
 import DownloadsView from './components/DownloadsView.vue'
 import PlaylistView from './components/PlaylistView.vue'
 import UpdateModal from './components/UpdateModal.vue'
+import GlobalModal from './components/GlobalModal.vue'
+import ToastContainer from './components/ToastContainer.vue'
 import { usePlayerStore } from './store/player'
 import { useDownloadsStore } from './store/downloads'
 import { useUpdaterStore } from './store/updater'
+import { setupMediaIntegration } from './utils/mediaSession'
+
+import { provide } from 'vue'
 
 type View = 'search' | 'library' | 'downloads' | 'playlists'
-const currentView = ref<View>('search')
+const currentView = ref<View>('library')
+
+function navigate(view: View) {
+  currentView.value = view
+}
+provide('navigate', navigate)
 
 const playerStore = usePlayerStore()
 const downloadsStore = useDownloadsStore()
@@ -22,6 +32,7 @@ onMounted(() => {
   playerStore.startPolling()
   downloadsStore.startPolling()
   updaterStore.init()
+  setupMediaIntegration()
 })
 
 </script>
@@ -31,14 +42,16 @@ onMounted(() => {
     <Sidebar :current-view="currentView" @navigate="currentView = $event" />
 
     <main class="main-content">
-      <SearchView   v-if="currentView === 'search'"    />
-      <LibraryView  v-if="currentView === 'library'"   />
-      <DownloadsView v-if="currentView === 'downloads'" />
-      <PlaylistView v-if="currentView === 'playlists'" />
+      <SearchView   v-show="currentView === 'search'"    />
+      <LibraryView  v-show="currentView === 'library'"   />
+      <DownloadsView v-show="currentView === 'downloads'" />
+      <PlaylistView v-show="currentView === 'playlists'" />
     </main>
 
     <PlayerBar />
     <UpdateModal />
+    <GlobalModal />
+    <ToastContainer />
   </div>
 </template>
 

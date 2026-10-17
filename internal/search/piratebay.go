@@ -20,7 +20,7 @@ type PirateBaySearcher struct {
 
 func NewPirateBaySearcher() *PirateBaySearcher {
 	return &PirateBaySearcher{
-		client: &http.Client{Timeout: 15 * time.Second},
+		client: &http.Client{Timeout: 4 * time.Second},
 	}
 }
 

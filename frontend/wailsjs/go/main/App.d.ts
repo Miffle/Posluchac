@@ -50,6 +50,8 @@ export function GetLibrary():Promise<Array<library.Track>>;
 
 export function GetPlaylistTracks(arg1:number):Promise<Array<library.Track>>;
 
+export function GetPlaylistsForTrack(arg1:number):Promise<Array<number>>;
+
 export function GetProgress():Promise<Array<torrent.DownloadProgress>>;
 
 export function GetStatus():Promise<audio.Status>;
@@ -75,6 +77,8 @@ export function Pause():Promise<void>;
 export function PauseTorrent(arg1:string):Promise<void>;
 
 export function PlayTrack(arg1:string,arg2:string):Promise<void>;
+
+export function RemoveFromPlaylist(arg1:number,arg2:number):Promise<void>;
 
 export function RemoveTorrent(arg1:string,arg2:boolean):Promise<void>;
 

@@ -4,7 +4,15 @@ import { GetStatus, Pause, Stop, SeekTo, SetVolume, PlayTrack } from '../../wail
 
 export interface PlayerStatus {
   state: 'playing' | 'paused' | 'stopped'
-  track?: { infoHash: string; filePath: string; fileName: string; coverPath?: string }
+  track?: {
+    infoHash: string
+    filePath: string
+    fileName: string
+    title?: string
+    artist?: string
+    album?: string
+    coverPath?: string
+  }
   positionSec: number
   durationSec: number
   volume: number
@@ -16,6 +24,9 @@ export interface QueueTrack {
   infoHash: string
   filePath: string
   fileName: string
+  title?: string
+  artist?: string
+  album?: string
   coverPath?: string
 }
 
@@ -183,11 +194,18 @@ export const usePlayerStore = defineStore('player', () => {
 
   const isPlaying = computed(() => status.value.state === 'playing')
   const isPaused  = computed(() => status.value.state === 'paused')
+  const currentQueueTrack = computed(() => {
+    if (currentIndex.value >= 0 && currentIndex.value < playlist.value.length) {
+      return playlist.value[currentIndex.value]
+    }
+    return null
+  })
 
   return {
     status,
     isPlaying,
     isPaused,
+    currentQueueTrack,
     repeatMode,
     isShuffled,
     playlist,

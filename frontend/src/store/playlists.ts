@@ -1,0 +1,133 @@
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import {
+  ListPlaylists,
+  CreatePlaylist,
+  DeletePlaylist,
+  GetPlaylistTracks,
+  AddToPlaylist,
+  RemoveFromPlaylist,
+  GetPlaylistsForTrack
+} from '../../wailsjs/go/main/App'
+
+export interface Playlist {
+  id: number
+  name: string
+  createdAt: string
+}
+
+export interface PlaylistTrack {
+  id: number
+  infoHash: string
+  filePath: string
+  fileName: string
+  title: string
+  artist: string
+  album?: string
+  genre?: string
+  durationSec: number
+  coverPath?: string
+  favourite?: boolean
+}
+
+export const usePlaylistsStore = defineStore('playlists', () => {
+  const playlists = ref<Playlist[]>([])
+  const selected = ref<Playlist | null>(null)
+  const tracks = ref<PlaylistTrack[]>([])
+  const toastMessage = ref<string | null>(null)
+
+  function showToast(msg: string) {
+    toastMessage.value = msg
+    setTimeout(() => {
+      if (toastMessage.value === msg) {
+        toastMessage.value = null
+      }
+    }, 2800)
+  }
+
+  async function loadPlaylists() {
+    try {
+      const res = await ListPlaylists()
+      playlists.value = (res || []) as Playlist[]
+    } catch (e) {
+      console.error('Failed to list playlists', e)
+    }
+  }
+
+  async function create(name: string): Promise<number> {
+    const trimmed = name.trim()
+    if (!trimmed) return 0
+    const id = await CreatePlaylist(trimmed)
+    await loadPlaylists()
+    showToast(`Плейлист «${trimmed}» создан`)
+    return id
+  }
+
+  async function remove(id: number) {
+    await DeletePlaylist(id)
+    if (selected.value?.id === id) {
+      selected.value = null
+      tracks.value = []
+    }
+    await loadPlaylists()
+  }
+
+  async function select(p: Playlist) {
+    selected.value = p
+    await refreshSelectedTracks()
+  }
+
+  async function refreshSelectedTracks() {
+    if (!selected.value) return
+    try {
+      const res = await GetPlaylistTracks(selected.value.id)
+      tracks.value = (res || []) as PlaylistTrack[]
+    } catch (e) {
+      console.error('Failed to get playlist tracks', e)
+    }
+  }
+
+  async function addTrack(playlistId: number, trackId: number, playlistName?: string) {
+    await AddToPlaylist(playlistId, trackId, 0)
+    if (selected.value?.id === playlistId) {
+      await refreshSelectedTracks()
+    }
+    const name = playlistName || playlists.value.find(p => p.id === playlistId)?.name || 'плейлист'
+    showToast(`Трек добавлен в «${name}»`)
+  }
+
+  async function removeTrack(playlistId: number, trackId: number, playlistName?: string) {
+    await RemoveFromPlaylist(playlistId, trackId)
+    if (selected.value?.id === playlistId) {
+      await refreshSelectedTracks()
+    }
+    const name = playlistName || playlists.value.find(p => p.id === playlistId)?.name || 'плейлист'
+    showToast(`Трек убран из «${name}»`)
+  }
+
+  async function getPlaylistsForTrack(trackId: number): Promise<number[]> {
+    try {
+      const res = await GetPlaylistsForTrack(trackId)
+      return (res || []) as number[]
+    } catch (e) {
+      console.error('Failed to get playlists for track', e)
+      return []
+    }
+  }
+
+  return {
+    playlists,
+    selected,
+    tracks,
+    toastMessage,
+    loadPlaylists,
+    create,
+    remove,
+    select,
+    refreshSelectedTracks,
+    addTrack,
+    removeTrack,
+    getPlaylistsForTrack,
+    showToast
+  }
+})

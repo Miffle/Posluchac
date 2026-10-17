@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/user/torrent-player/internal/audio"
+	"github.com/user/torrent-player/internal/hotkeys"
 	"github.com/user/torrent-player/internal/library"
 	"github.com/user/torrent-player/internal/metadata"
 	"github.com/user/torrent-player/internal/search"
@@ -35,6 +36,7 @@ type App struct {
 	sources     *sources.Manager
 	searcher    *search.MultiSearcher
 	rutracker   *search.RutrackerSearcher
+	hotkeys     *hotkeys.Manager
 	dataDir     string
 	downloadDir string
 }
@@ -108,6 +110,9 @@ func (a *App) startup(ctx context.Context) {
 		// Rutracker added after login via LoginRutracker()
 	)
 
+	// Start global media hotkeys listener (Fn+F7/F8/F9 etc.)
+	a.hotkeys = hotkeys.Start(a.ctx)
+
 	// Run initial library scan and background watcher for Music/TorrentPlayer
 	go func() {
 		time.Sleep(1 * time.Second)
@@ -121,6 +126,9 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown is called by Wails when the app closes.
 func (a *App) shutdown(_ context.Context) {
+	if a.hotkeys != nil {
+		a.hotkeys.Stop()
+	}
 	a.player.Stop()
 	a.engine.Close()
 	_ = a.library.Close()
@@ -368,9 +376,31 @@ func (a *App) PlayTrack(infoHash, filePath string) error {
 	ext := filepath.Ext(filePath)
 
 	coverPath := ""
+	var title, artist, album string
 	if a.library != nil {
 		if t, err := a.library.GetTrackByPath(diskPath); err == nil && t != nil {
 			coverPath = t.CoverPath
+			title = t.Title
+			artist = t.Artist
+			album = t.Album
+		} else if t, err := a.library.GetTrackByPath(filePath); err == nil && t != nil {
+			coverPath = t.CoverPath
+			title = t.Title
+			artist = t.Artist
+			album = t.Album
+		}
+	}
+	if (title == "" || artist == "") && diskPath != "" {
+		if tags, err := metadata.ReadFile(diskPath); err == nil && tags != nil {
+			if title == "" {
+				title = tags.Title
+			}
+			if artist == "" {
+				artist = tags.Artist
+			}
+			if album == "" {
+				album = tags.Album
+			}
 		}
 	}
 	if coverPath == "" {
@@ -381,6 +411,9 @@ func (a *App) PlayTrack(infoHash, filePath string) error {
 		InfoHash:  infoHash,
 		FilePath:  filePath,
 		FileName:  filepath.Base(filePath),
+		Title:     title,
+		Artist:    artist,
+		Album:     album,
 		CoverPath: coverPath,
 	}
 
@@ -496,6 +529,22 @@ func (a *App) AddToPlaylist(playlistID, trackID int64, position int) error {
 // DeletePlaylist removes a playlist.
 func (a *App) DeletePlaylist(playlistID int64) error {
 	return a.library.DeletePlaylist(playlistID)
+}
+
+// RemoveFromPlaylist removes a track from a playlist.
+func (a *App) RemoveFromPlaylist(playlistID, trackID int64) error {
+	if a.library == nil {
+		return fmt.Errorf("library not initialized")
+	}
+	return a.library.RemoveFromPlaylist(playlistID, trackID)
+}
+
+// GetPlaylistsForTrack returns IDs of all playlists containing this track.
+func (a *App) GetPlaylistsForTrack(trackID int64) ([]int64, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+	return a.library.GetPlaylistsForTrack(trackID)
 }
 
 // ─── Files and Folders ────────────────────────────────────────────────────────

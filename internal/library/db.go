@@ -232,12 +232,47 @@ func (l *DB) CreatePlaylist(name string) (int64, error) {
 	return res.LastInsertId()
 }
 
-// AddToPlaylist appends a track to a playlist at the given position.
+// AddToPlaylist appends a track to a playlist at the given position. If position <= 0, it places it at the end.
 func (l *DB) AddToPlaylist(playlistID, trackID int64, position int) error {
+	var count int
+	_ = l.db.QueryRow(`SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?`, playlistID, trackID).Scan(&count)
+	if count > 0 {
+		return nil
+	}
+
+	if position <= 0 {
+		row := l.db.QueryRow(`SELECT COALESCE(MAX(position), 0) + 1 FROM playlist_tracks WHERE playlist_id = ?`, playlistID)
+		_ = row.Scan(&position)
+	}
 	_, err := l.db.Exec(`
-		INSERT OR REPLACE INTO playlist_tracks (playlist_id, track_id, position)
+		INSERT OR IGNORE INTO playlist_tracks (playlist_id, track_id, position)
 		VALUES (?, ?, ?)`, playlistID, trackID, position)
 	return err
+}
+
+// RemoveFromPlaylist removes a track from a playlist.
+func (l *DB) RemoveFromPlaylist(playlistID, trackID int64) error {
+	_, err := l.db.Exec(`DELETE FROM playlist_tracks WHERE playlist_id = ? AND track_id = ?`, playlistID, trackID)
+	return err
+}
+
+// GetPlaylistsForTrack returns IDs of all playlists containing the track.
+func (l *DB) GetPlaylistsForTrack(trackID int64) ([]int64, error) {
+	rows, err := l.db.Query(`SELECT playlist_id FROM playlist_tracks WHERE track_id = ?`, trackID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // GetPlaylistTracks returns all tracks in a playlist ordered by position.

@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,7 @@ type ManagedTorrent struct {
 	State           TorrentState
 	SelectedPaths   []string // paths of files chosen by the user for selective download
 	DownloadAll     bool     // true if user explicitly requested all files
+	AddedAt         time.Time
 	lastReadBytes   int64
 	lastWriteBytes  int64
 	lastSpeedSample time.Time
@@ -55,6 +57,43 @@ type DownloadProgress struct {
 	UploadSpeed   float64 `json:"uploadSpeed"`
 	Seeders       int     `json:"seeders"`
 	State         string  `json:"state"`
+	AddedAt       int64   `json:"addedAt"`
+	SelectedCount int     `json:"selectedCount"`
+	SelectedTrack string  `json:"selectedTrack,omitempty"`
+}
+
+var defaultPublicTrackers = [][]string{
+	{"udp://tracker.opentrackr.org:1337/announce"},
+	{"udp://open.stealth.si:80/announce"},
+	{"udp://tracker.torrent.eu.org:451/announce"},
+	{"udp://tracker.bittor.pw:1337/announce"},
+	{"udp://public.popcorn-tracker.org:6969/announce"},
+	{"udp://tracker.dler.org:6969/announce"},
+	{"udp://exodus.desync.com:6969/announce"},
+	{"udp://open.demonii.com:1337/announce"},
+	{"udp://tracker.openbittorrent.com:6969/announce"},
+	{"http://tracker.openbittorrent.com:80/announce"},
+}
+
+func injectPublicTrackers(spec *torrent.TorrentSpec) {
+	if spec == nil {
+		return
+	}
+	existing := make(map[string]bool)
+	for _, tier := range spec.Trackers {
+		for _, tr := range tier {
+			existing[strings.ToLower(strings.TrimSpace(tr))] = true
+		}
+	}
+	for _, tier := range defaultPublicTrackers {
+		for _, tr := range tier {
+			norm := strings.ToLower(strings.TrimSpace(tr))
+			if !existing[norm] {
+				spec.Trackers = append(spec.Trackers, []string{tr})
+				existing[norm] = true
+			}
+		}
+	}
 }
 
 // Engine manages all torrent operations.
@@ -159,11 +198,30 @@ func (e *Engine) deleteTorrent(infoHash string) {
 	_, _ = e.db.Exec(`DELETE FROM managed_torrents WHERE info_hash = ?`, infoHash)
 }
 
+// saveTorrentMetainfo caches the .torrent file in cacheDir so future launches load metadata instantly.
+func (e *Engine) saveTorrentMetainfo(t *torrent.Torrent) {
+	if t == nil || t.Info() == nil {
+		return
+	}
+	infoHash := t.InfoHash().HexString()
+	metaPath := filepath.Join(e.cacheDir, infoHash+".torrent")
+	if _, err := os.Stat(metaPath); err == nil {
+		return // already cached
+	}
+	mi := t.Metainfo()
+	f, err := os.Create(metaPath)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_ = mi.Write(f)
+}
+
 func (e *Engine) restoreTorrents() {
 	if e.db == nil {
 		return
 	}
-	rows, err := e.db.Query(`SELECT info_hash, name, magnet_uri, selected_paths, state FROM managed_torrents ORDER BY created_at DESC`)
+	rows, err := e.db.Query(`SELECT info_hash, name, magnet_uri, selected_paths, state, COALESCE(created_at, CURRENT_TIMESTAMP) FROM managed_torrents ORDER BY created_at DESC`)
 	if err != nil {
 		return
 	}
@@ -175,11 +233,12 @@ func (e *Engine) restoreTorrents() {
 		magnetURI    string
 		selectedJSON string
 		state        string
+		createdAt    string
 	}
 	var list []savedT
 	for rows.Next() {
 		var s savedT
-		if err := rows.Scan(&s.infoHash, &s.name, &s.magnetURI, &s.selectedJSON, &s.state); err == nil {
+		if err := rows.Scan(&s.infoHash, &s.name, &s.magnetURI, &s.selectedJSON, &s.state, &s.createdAt); err == nil {
 			list = append(list, s)
 		}
 	}
@@ -192,10 +251,35 @@ func (e *Engine) restoreTorrents() {
 		var paths []string
 		_ = json.Unmarshal([]byte(item.selectedJSON), &paths)
 
-		t, err := e.client.AddMagnet(item.magnetURI)
-		if err != nil {
-			continue
+		var addedAt time.Time
+		if t, err := time.Parse("2006-01-02 15:04:05", item.createdAt); err == nil {
+			addedAt = t
+		} else if t, err := time.Parse(time.RFC3339, item.createdAt); err == nil {
+			addedAt = t
+		} else {
+			addedAt = time.Now()
 		}
+
+		metaPath := filepath.Join(e.cacheDir, item.infoHash+".torrent")
+		var t *torrent.Torrent
+		if _, err := os.Stat(metaPath); err == nil {
+			t, _ = e.client.AddTorrentFromFile(metaPath)
+		}
+		if t == nil {
+			spec, specErr := torrent.TorrentSpecFromMagnetUri(item.magnetURI)
+			if specErr == nil {
+				injectPublicTrackers(spec)
+				t, _, _ = e.client.AddTorrentSpec(spec)
+			}
+			if t == nil {
+				var addErr error
+				t, addErr = e.client.AddMagnet(item.magnetURI)
+				if addErr != nil {
+					continue
+				}
+			}
+		}
+		t.AddTrackers(defaultPublicTrackers)
 
 		infoHash := t.InfoHash().HexString()
 		mt := &ManagedTorrent{
@@ -205,6 +289,7 @@ func (e *Engine) restoreTorrents() {
 			MagnetURI:     item.magnetURI,
 			State:         TorrentState(item.state),
 			SelectedPaths: paths,
+			AddedAt:       addedAt,
 		}
 
 		e.mu.Lock()
@@ -217,6 +302,8 @@ func (e *Engine) restoreTorrents() {
 			case <-time.After(90 * time.Second):
 				return
 			}
+
+			e.saveTorrentMetainfo(t)
 
 			if mt.Name == "" || mt.Name == mt.InfoHash {
 				mt.Name = t.Name()
@@ -260,12 +347,14 @@ func (e *Engine) AddMagnetPending(magnetURI string) (string, []FileInfo, error) 
 
 	spec.DisallowDataDownload = true
 	spec.DisallowDataUpload = true
+	injectPublicTrackers(spec)
 
 	t, _, err := e.client.AddTorrentSpec(spec)
 	if err != nil {
 		return "", nil, fmt.Errorf("add magnet: %w", err)
 	}
 
+	t.AddTrackers(defaultPublicTrackers)
 	t.DisallowDataDownload()
 	t.DisallowDataUpload()
 
@@ -310,12 +399,14 @@ func (e *Engine) AddTorrentFilePending(filePath string) (string, []FileInfo, err
 	spec := torrent.TorrentSpecFromMetaInfo(mi)
 	spec.DisallowDataDownload = true
 	spec.DisallowDataUpload = true
+	injectPublicTrackers(spec)
 
 	t, _, err := e.client.AddTorrentSpec(spec)
 	if err != nil {
 		return "", nil, fmt.Errorf("add torrent spec: %w", err)
 	}
 
+	t.AddTrackers(defaultPublicTrackers)
 	t.DisallowDataDownload()
 	t.DisallowDataUpload()
 
@@ -386,6 +477,7 @@ func (e *Engine) DownloadSelectedFiles(infoHash string, selectedPaths []string) 
 			MagnetURI:     magnet,
 			State:         StateDownloading,
 			SelectedPaths: selectedPaths,
+			AddedAt:       time.Now(),
 		}
 		e.torrents[infoHash] = mt
 	} else {
@@ -406,6 +498,7 @@ func (e *Engine) DownloadSelectedFiles(infoHash string, selectedPaths []string) 
 	// Enable data transfer on the torrent now that download has been confirmed
 	mt.T.AllowDataDownload()
 	mt.T.AllowDataUpload()
+	mt.T.AddTrackers(defaultPublicTrackers)
 
 	isDownloadAll := len(selectedPaths) == 0 && len(mt.SelectedPaths) == 0
 	mt.DownloadAll = isDownloadAll
@@ -533,10 +626,17 @@ func (e *Engine) buildFileList(t *torrent.Torrent, infoHash string, audioOnly bo
 
 // AddMagnet adds a torrent via magnet link and starts downloading all files.
 func (e *Engine) AddMagnet(magnetURI string) (string, error) {
-	t, err := e.client.AddMagnet(magnetURI)
+	spec, err := torrent.TorrentSpecFromMagnetUri(magnetURI)
 	if err != nil {
 		return "", fmt.Errorf("add magnet: %w", err)
 	}
+	injectPublicTrackers(spec)
+
+	t, _, err := e.client.AddTorrentSpec(spec)
+	if err != nil {
+		return "", fmt.Errorf("add magnet: %w", err)
+	}
+	t.AddTrackers(defaultPublicTrackers)
 
 	<-t.GotInfo()
 	infoHash := t.InfoHash().HexString()
@@ -548,9 +648,11 @@ func (e *Engine) AddMagnet(magnetURI string) (string, error) {
 		Name:      t.Name(),
 		MagnetURI: magnetURI,
 		State:     StateDownloading,
+		AddedAt:   time.Now(),
 	}
 	e.mu.Unlock()
 
+	e.saveTorrentMetainfo(t)
 	e.saveTorrent(infoHash, t.Name(), magnetURI, nil, StateDownloading)
 
 	t.DownloadAll()
@@ -563,6 +665,7 @@ func (e *Engine) AddTorrentFile(filePath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("add torrent file: %w", err)
 	}
+	t.AddTrackers(defaultPublicTrackers)
 
 	<-t.GotInfo()
 	infoHash := t.InfoHash().HexString()
@@ -579,9 +682,11 @@ func (e *Engine) AddTorrentFile(filePath string) (string, error) {
 		Name:      t.Name(),
 		MagnetURI: magnet,
 		State:     StateDownloading,
+		AddedAt:   time.Now(),
 	}
 	e.mu.Unlock()
 
+	e.saveTorrentMetainfo(t)
 	e.saveTorrent(infoHash, t.Name(), magnet, nil, StateDownloading)
 
 	t.DownloadAll()
@@ -642,18 +747,34 @@ func (e *Engine) GetProgress() []DownloadProgress {
 			name = mt.InfoHash
 		}
 
+		if mt.AddedAt.IsZero() {
+			mt.AddedAt = time.Now()
+		}
+		addedAt := mt.AddedAt.UnixMilli()
+
+		selectedCount := len(mt.SelectedPaths)
+		selectedTrack := ""
+		if selectedCount == 1 {
+			selectedTrack = filepath.Base(mt.SelectedPaths[0])
+		}
+
 		if mt.T == nil || mt.T.Info() == nil {
 			result = append(result, DownloadProgress{
-				InfoHash:    mt.InfoHash,
-				Name:        name,
-				Downloaded:  0,
-				Total:       0,
-				PercentDone: 0,
-				State:       string(mt.State),
-				Seeders:     0,
+				InfoHash:      mt.InfoHash,
+				Name:          name,
+				Downloaded:    0,
+				Total:         0,
+				PercentDone:   0,
+				State:         "metadata",
+				Seeders:       0,
+				AddedAt:       addedAt,
+				SelectedCount: selectedCount,
+				SelectedTrack: selectedTrack,
 			})
 			continue
 		}
+
+		e.saveTorrentMetainfo(mt.T)
 
 		stats := mt.T.Stats()
 		files := mt.T.Files()
@@ -743,17 +864,26 @@ func (e *Engine) GetProgress() []DownloadProgress {
 			isSelected := isDownloadAll || selectedMap[fPath] || selectedMap[fNorm] || selectedMap[strings.ToLower(fNorm)]
 
 			if isSelected || isCoverForSelected {
-				total += f.Length()
-				downloaded += f.BytesCompleted()
+				fLen := f.Length()
+				total += fLen
+				fComp := f.BytesCompleted()
 
-				// If this selected or cover file is 100% complete, export it cleanly into exportDir!
-				if f.BytesCompleted() == f.Length() && f.Length() > 0 {
-					dst := filepath.Join(e.exportDir, f.Path())
-					fi, statErr := os.Stat(dst)
-					if os.IsNotExist(statErr) || (statErr == nil && fi.Size() < f.Length()) {
+				// If the file already exists completed in exportDir (Music folder)
+				dst := filepath.Join(e.exportDir, f.Path())
+				if fi, statErr := os.Stat(dst); statErr == nil && fi.Size() >= fLen && fLen > 0 {
+					fComp = fLen
+				}
+
+				downloaded += fComp
+
+				// If 100% complete in cache, export it asynchronously
+				if f.BytesCompleted() == fLen && fLen > 0 {
+					if fi, statErr := os.Stat(dst); os.IsNotExist(statErr) || (statErr == nil && fi.Size() < fLen) {
 						src := filepath.Join(e.cacheDir, f.Path())
-						if srcFi, srcErr := os.Stat(src); srcErr == nil && srcFi.Size() >= f.Length() {
-							_ = copyFile(src, dst)
+						if srcFi, srcErr := os.Stat(src); srcErr == nil && srcFi.Size() >= fLen {
+							go func(s, d string) {
+								_ = copyFile(s, d)
+							}(src, dst)
 						}
 					}
 				}
@@ -798,8 +928,19 @@ func (e *Engine) GetProgress() []DownloadProgress {
 			UploadSpeed:   mt.uploadSpeed,
 			Seeders:       stats.ConnectedSeeders,
 			State:         state,
+			AddedAt:       addedAt,
+			SelectedCount: selectedCount,
+			SelectedTrack: selectedTrack,
 		})
 	}
+
+	// Stable deterministic sorting: newest first (AddedAt DESC), tie-breaker by InfoHash
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].AddedAt != result[j].AddedAt {
+			return result[i].AddedAt > result[j].AddedAt
+		}
+		return result[i].InfoHash < result[j].InfoHash
+	})
 
 	return result
 }

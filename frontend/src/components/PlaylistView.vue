@@ -1,40 +1,32 @@
 <script lang="ts" setup>
 import { ref, onMounted } from 'vue'
-import { ListPlaylists, CreatePlaylist, DeletePlaylist, GetPlaylistTracks, AddToPlaylist } from '../../wailsjs/go/main/App'
+import { usePlaylistsStore, Playlist, PlaylistTrack } from '../store/playlists'
 import { usePlayerStore } from '../store/player'
+import { useDialogStore } from '../store/dialog'
+import PlaylistAddTracksModal from './PlaylistAddTracksModal.vue'
 
-interface Playlist { id: number; name: string; createdAt: string }
-interface Track { id: number; infoHash: string; filePath: string; fileName: string; title: string; artist: string; durationSec: number }
-
-const playlists = ref<Playlist[]>([])
-const selected = ref<Playlist | null>(null)
-const tracks = ref<Track[]>([])
-const newName = ref('')
+const playlistsStore = usePlaylistsStore()
 const player = usePlayerStore()
-
-async function load() {
-  const res = await ListPlaylists()
-  playlists.value = (res || []) as Playlist[]
-}
-
-async function selectPlaylist(p: Playlist) {
-  selected.value = p
-  const res = await GetPlaylistTracks(p.id)
-  tracks.value = (res || []) as Track[]
-}
+const dialog = useDialogStore()
+const newName = ref('')
+const showAddModal = ref(false)
 
 async function createPlaylist() {
   if (!newName.value.trim()) return
-  await CreatePlaylist(newName.value.trim())
+  await playlistsStore.create(newName.value.trim())
   newName.value = ''
-  await load()
 }
 
 async function deletePlaylist(id: number) {
-  if (!confirm('Удалить плейлист?')) return
-  await DeletePlaylist(id)
-  if (selected.value?.id === id) { selected.value = null; tracks.value = [] }
-  await load()
+  const ok = await dialog.confirm({
+    title: 'Удаление плейлиста',
+    message: 'Вы уверены, что хотите удалить этот плейлист?',
+    details: 'Треки останутся в вашей библиотеке и на диске.',
+    confirmText: 'Удалить плейлист',
+    danger: true
+  })
+  if (!ok) return
+  await playlistsStore.remove(id)
 }
 
 function formatDuration(sec: number) {
@@ -44,60 +36,106 @@ function formatDuration(sec: number) {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-onMounted(load)
+function isTrackActive(t: PlaylistTrack): boolean {
+  return player.status.track?.filePath === t.filePath
+}
+
+function isTrackPlaying(t: PlaylistTrack): boolean {
+  return isTrackActive(t) && player.isPlaying
+}
+
+function handlePlayClick(t: PlaylistTrack) {
+  if (isTrackActive(t)) {
+    player.togglePause()
+  } else {
+    const queue = playlistsStore.tracks.map(item => ({
+      infoHash: item.infoHash,
+      filePath: item.filePath,
+      fileName: item.fileName,
+      title: item.title,
+      artist: item.artist,
+      album: item.album,
+      coverPath: item.coverPath
+    }))
+    player.play(t.infoHash, t.filePath, queue)
+  }
+}
+
+onMounted(() => {
+  playlistsStore.loadPlaylists()
+})
 </script>
 
 <template>
   <div class="playlist-view">
-    <h1>Плейлисты</h1>
+    <div class="view-header-row">
+      <h1>Плейлисты</h1>
+      <div class="toast-pill" v-if="playlistsStore.toastMessage">
+        {{ playlistsStore.toastMessage }}
+      </div>
+    </div>
 
     <div class="layout">
-      <!-- Playlist list -->
+      <!-- Playlist sidebar -->
       <div class="playlist-sidebar">
         <div class="new-playlist">
-          <input v-model="newName" type="text" placeholder="Новый плейлист..." @keyup.enter="createPlaylist" />
-          <button class="btn btn-accent" @click="createPlaylist">+</button>
+          <input
+            v-model="newName"
+            type="text"
+            placeholder="Новый плейлист..."
+            @keyup.enter="createPlaylist"
+          />
+          <button class="btn btn-accent" @click="createPlaylist" title="Создать">+</button>
         </div>
 
         <div class="playlist-items">
           <div
-            v-for="p in playlists"
+            v-for="p in playlistsStore.playlists"
             :key="p.id"
             class="playlist-item"
-            :class="{ active: selected?.id === p.id }"
-            @click="selectPlaylist(p)"
+            :class="{ active: playlistsStore.selected?.id === p.id }"
+            @click="playlistsStore.select(p)"
           >
             <span class="pl-icon">📋</span>
             <span class="pl-name">{{ p.name }}</span>
-            <button class="pl-delete" @click.stop="deletePlaylist(p.id)" title="Удалить">✕</button>
+            <button class="pl-delete" @click.stop="deletePlaylist(p.id)" title="Удалить плейлист">✕</button>
           </div>
         </div>
       </div>
 
       <!-- Track list -->
       <div class="track-panel">
-        <div v-if="!selected" class="empty-state">
+        <div v-if="!playlistsStore.selected" class="empty-state">
           <div class="empty-icon">📋</div>
-          <p>Выбери плейлист</p>
+          <p>Выберите плейлист слева</p>
+          <p class="empty-hint">Или создайте новый, чтобы собрать любимые треки</p>
         </div>
 
         <template v-else>
           <div class="track-panel-header">
-            <h2>{{ selected.name }}</h2>
-            <span class="track-count">{{ tracks.length }} треков</span>
+            <div class="header-titles">
+              <h2>{{ playlistsStore.selected.name }}</h2>
+              <span class="track-count">{{ playlistsStore.tracks.length }} треков</span>
+            </div>
+            <button class="btn btn-accent btn-sm" @click="showAddModal = true">
+              ➕ Добавить треки
+            </button>
           </div>
 
-          <div v-if="!tracks.length" class="empty-state">
-            <p class="empty-hint">Плейлист пуст. Добавь треки из библиотеки.</p>
+          <div v-if="!playlistsStore.tracks.length" class="empty-state">
+            <p class="empty-hint">Плейлист пока пуст.</p>
+            <button class="btn btn-accent btn-sm btn-empty-add" @click="showAddModal = true">
+              ➕ Добавить треки из библиотеки
+            </button>
           </div>
 
           <div class="track-list" v-else>
             <div
-              v-for="(t, idx) in tracks"
+              v-for="(t, idx) in playlistsStore.tracks"
               :key="t.id"
               class="track-row"
-              @dblclick="player.play(t.infoHash, t.filePath)"
-              :class="{ playing: player.status.track?.filePath === t.filePath }"
+              @dblclick="handlePlayClick(t)"
+              :class="{ playing: isTrackActive(t) }"
             >
               <span class="track-num">{{ idx + 1 }}</span>
               <div class="track-info">
@@ -105,24 +143,70 @@ onMounted(load)
                 <div class="track-artist" v-if="t.artist">{{ t.artist }}</div>
               </div>
               <div class="track-duration">{{ formatDuration(t.durationSec) }}</div>
-              <button class="play-btn" @click="player.play(t.infoHash, t.filePath)">▶</button>
+              <div class="track-actions">
+                <button
+                  class="play-btn"
+                  :class="{ 'is-playing': isTrackPlaying(t) }"
+                  @click.stop="handlePlayClick(t)"
+                  :title="isTrackPlaying(t) ? 'Пауза' : 'Воспроизвести'"
+                >
+                  {{ isTrackPlaying(t) ? '⏸' : '▶' }}
+                </button>
+                <button
+                  class="del-btn"
+                  @click.stop="playlistsStore.removeTrack(playlistsStore.selected.id, t.id)"
+                  title="Убрать из плейлиста"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
           </div>
         </template>
       </div>
     </div>
+
+    <!-- Modal to add library tracks into this playlist -->
+    <PlaylistAddTracksModal
+      :playlist="showAddModal ? playlistsStore.selected : null"
+      @close="showAddModal = false"
+    />
   </div>
 </template>
 
 <style scoped>
-.playlist-view { display: flex; flex-direction: column; gap: 20px; height: 100%; }
+.playlist-view { display: flex; flex-direction: column; gap: 20px; height: 100%; position: relative; }
+.view-header-row { display: flex; align-items: center; justify-content: space-between; }
 h1 { font-size: 24px; font-weight: 700; }
+
+.toast-pill {
+  background: var(--accent);
+  color: #000;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  animation: toast-in 0.2s ease-out;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .layout { display: grid; grid-template-columns: 240px 1fr; gap: 20px; flex: 1; min-height: 0; }
 
 .playlist-sidebar { display: flex; flex-direction: column; gap: 12px; }
 .new-playlist { display: flex; gap: 8px; }
-.new-playlist input { flex: 1; }
+.new-playlist input {
+  flex: 1;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.new-playlist input:focus { border-color: var(--accent); outline: none; }
 .new-playlist .btn { padding: 8px 14px; font-size: 18px; line-height: 1; }
 
 .playlist-items { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
@@ -132,24 +216,29 @@ h1 { font-size: 24px; font-weight: 700; }
   cursor: pointer; transition: background 0.1s;
 }
 .playlist-item:hover { background: var(--surface); }
-.playlist-item.active { background: var(--surface); color: var(--accent); }
+.playlist-item.active { background: var(--surface); color: var(--accent); font-weight: 600; }
 .pl-icon { font-size: 15px; }
-.pl-name { flex: 1; font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pl-delete { opacity: 0; font-size: 13px; padding: 2px 6px; border-radius: 4px; transition: opacity 0.1s, background 0.1s; }
+.pl-name { flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-delete {
+  opacity: 0; font-size: 13px; padding: 2px 6px; border-radius: 4px;
+  transition: opacity 0.1s, background 0.1s;
+}
 .playlist-item:hover .pl-delete { opacity: 0.5; }
 .pl-delete:hover { opacity: 1 !important; background: var(--danger); color: #fff; }
 
 /* Track panel */
 .track-panel { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
-.track-panel-header { display: flex; align-items: baseline; gap: 12px; }
+.track-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.header-titles { display: flex; align-items: baseline; gap: 12px; }
 .track-panel-header h2 { font-size: 20px; font-weight: 700; }
 .track-count { font-size: 13px; color: var(--text2); }
 
 .empty-state { text-align: center; padding: 40px 0; color: var(--text2); }
 .empty-icon { font-size: 48px; margin-bottom: 12px; }
 .empty-hint { font-size: 13px; opacity: 0.7; }
+.btn-empty-add { margin-top: 14px; }
 
-.track-list { display: flex; flex-direction: column; }
+.track-list { display: flex; flex-direction: column; gap: 2px; }
 .track-row {
   display: grid;
   grid-template-columns: 28px 1fr auto auto;
@@ -161,16 +250,29 @@ h1 { font-size: 24px; font-weight: 700; }
   transition: background 0.1s;
 }
 .track-row:hover { background: var(--surface); }
-.track-row.playing .track-title { color: var(--accent); }
+.track-row.playing { background: rgba(29, 185, 84, 0.08); }
+.track-row.playing .track-title { color: var(--accent); font-weight: 600; }
 .track-num { font-size: 13px; color: var(--text2); text-align: right; }
 .track-title { font-size: 14px; font-weight: 500; }
 .track-artist { font-size: 12px; color: var(--text2); margin-top: 1px; }
 .track-duration { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; }
+
+.track-actions { display: flex; align-items: center; gap: 8px; }
+
 .play-btn {
   font-size: 12px; padding: 4px 12px;
   background: var(--accent); color: #000;
   border-radius: 12px; font-weight: 700;
-  opacity: 0; transition: opacity 0.1s;
+  opacity: 0; transition: opacity 0.1s, transform 0.1s;
 }
 .track-row:hover .play-btn { opacity: 1; }
+.track-row.playing .play-btn { opacity: 1; }
+.play-btn:hover { transform: scale(1.05); }
+
+.del-btn {
+  opacity: 0; font-size: 13px; padding: 2px 6px; border-radius: 4px;
+  color: var(--text2); transition: all 0.1s;
+}
+.track-row:hover .del-btn { opacity: 0.6; }
+.del-btn:hover { opacity: 1 !important; background: var(--danger); color: #fff; }
 </style>

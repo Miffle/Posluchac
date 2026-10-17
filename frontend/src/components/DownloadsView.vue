@@ -1,12 +1,26 @@
 <script lang="ts" setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useDownloadsStore } from '../store/downloads'
 import { usePlayerStore } from '../store/player'
+import { useDialogStore } from '../store/dialog'
 import { GetDownloadDir, OpenDownloadFolder, OpenFileInFolder } from '../../wailsjs/go/main/App'
 
 const downloads = useDownloadsStore()
 const player = usePlayerStore()
+const dialog = useDialogStore()
 const downloadDir = ref('')
+
+// Stable sorted downloads list (newest first, tie-breaker by infoHash)
+const sortedDownloads = computed(() => {
+  return [...downloads.downloads].sort((a, b) => {
+    const aTime = a.addedAt || 0
+    const bTime = b.addedAt || 0
+    if (aTime !== bTime) {
+      return bTime - aTime
+    }
+    return a.infoHash.localeCompare(b.infoHash)
+  })
+})
 
 // Expanded: infoHash → show file list
 const expanded = ref<Record<string, boolean>>({})
@@ -17,6 +31,7 @@ onMounted(async () => {
   } catch {
     /* ignore */
   }
+  await downloads.refreshProgress()
 })
 
 async function openFolder() {
@@ -42,25 +57,53 @@ function formatBytes(bytes: number) {
 }
 
 function stateColor(state: string) {
-  return { downloading: '#2196f3', seeding: '#4caf50', paused: '#ff9800', queued: '#9e9e9e' }[state] ?? '#9e9e9e'
+  return { 
+    downloading: '#2196f3', 
+    seeding: '#4caf50', 
+    paused: '#ff9800', 
+    queued: '#9e9e9e',
+    metadata: '#b388ff'
+  }[state] ?? '#9e9e9e'
 }
 
 function stateLabel(state: string) {
-  return { downloading: '⬇ Загрузка', seeding: '🌱 Раздаёт', paused: '⏸ Остановлено', queued: '⏳ Очередь' }[state] ?? state
+  return { 
+    downloading: '⬇ Загрузка', 
+    seeding: '🌱 Раздаёт', 
+    paused: '⏸ Остановлено', 
+    queued: '⏳ Очередь',
+    metadata: '⏳ Получение метаданных'
+  }[state] ?? state
 }
 async function onAddFile(infoHash: string, file: any) {
   await downloads.addFile(infoHash, file.path)
 }
 
 async function onDeleteFile(infoHash: string, file: any) {
-  if (confirm(`Удалить файл "${file.name}" с диска?`)) {
+  const ok = await dialog.confirm({
+    title: 'Удаление файла',
+    message: `Удалить файл «${file.name}» с диска?`,
+    details: 'Файл будет удален из папки загрузок.',
+    confirmText: 'Удалить',
+    danger: true
+  })
+  if (ok) {
     await downloads.removeFile(infoHash, file.path)
   }
 }
 
 async function onDeleteTorrent(d: any) {
-  const deleteFiles = confirm(`Удалить раздачу "${d.name}"?\n\nНажмите "ОК", чтобы также удалить скачанные файлы с диска, или "Отмена", чтобы просто убрать раздачу из списка.`)
-  await downloads.remove(d.infoHash, deleteFiles)
+  const choice = await dialog.choice({
+    title: 'Удаление раздачи',
+    message: `Что сделать с раздачей «${d.name}»?`,
+    options: [
+      { label: 'Удалить вместе с файлами с диска', value: 'with_files', danger: true },
+      { label: 'Только убрать из списка (оставить файлы)', value: 'keep_files' }
+    ],
+    cancelText: 'Отмена'
+  })
+  if (!choice) return
+  await downloads.remove(d.infoHash, choice === 'with_files')
 }
 </script>
 
@@ -85,9 +128,17 @@ async function onDeleteTorrent(d: any) {
     </div>
 
     <div class="download-list" v-else>
-      <div class="download-card" v-for="d in downloads.downloads" :key="d.infoHash">
+      <div class="download-card" v-for="d in sortedDownloads" :key="d.infoHash">
         <div class="download-header">
-          <div class="download-name" :title="d.name">{{ d.name }}</div>
+          <div class="download-title-group">
+            <div class="download-name" :title="d.name">{{ d.name }}</div>
+            <div class="download-selected-track" v-if="d.selectedTrack" :title="d.selectedTrack">
+              🎵 Выбран трек: <span class="track-highlight">{{ d.selectedTrack }}</span>
+            </div>
+            <div class="download-selected-track" v-else-if="d.selectedCount && d.selectedCount > 1">
+              🎵 Выбрано треков: <span class="track-highlight">{{ d.selectedCount }}</span>
+            </div>
+          </div>
           <div class="download-actions">
             <button
               class="ctrl"
@@ -114,16 +165,23 @@ async function onDeleteTorrent(d: any) {
         </div>
 
         <div class="progress-row">
-          <div class="progress-bar">
-            <div class="progress-fill" :style="{ width: d.percentDone + '%', background: stateColor(d.state) }"></div>
+          <div class="progress-bar" :class="{ 'is-metadata': d.state === 'metadata' }">
+            <div
+              class="progress-fill"
+              :style="{
+                width: d.state === 'metadata' ? '100%' : d.percentDone + '%',
+                background: d.state === 'metadata' ? undefined : stateColor(d.state)
+              }"
+            ></div>
           </div>
-          <span class="pct">{{ d.percentDone.toFixed(1) }}%</span>
+          <span class="pct">{{ d.state === 'metadata' ? '...' : d.percentDone.toFixed(1) + '%' }}</span>
         </div>
 
         <div class="download-meta">
           <span :style="{ color: stateColor(d.state) }" class="state-badge">{{ stateLabel(d.state) }}</span>
-          <span>{{ formatBytes(d.downloaded) }} / {{ formatBytes(d.total) }}</span>
-          <span>🌱 {{ d.seeders }} сидеров</span>
+          <span v-if="d.state === 'metadata'" class="meta-hint">Загрузка структуры файлов...</span>
+          <span v-else>{{ formatBytes(d.downloaded) }} / {{ formatBytes(d.total) }}</span>
+          <span v-if="d.seeders > 0 || d.state !== 'metadata'">🌱 {{ d.seeders }} сидеров</span>
           <span v-if="d.downloadSpeed > 0" class="speed-dl">⬇ {{ formatBytes(d.downloadSpeed) }}/s</span>
           <span v-if="d.uploadSpeed > 0 || d.state === 'seeding'" class="speed-ul">⬆ {{ formatBytes(d.uploadSpeed) }}/s</span>
         </div>
@@ -217,9 +275,15 @@ async function onDeleteTorrent(d: any) {
   display: flex; flex-direction: column; gap: 10px;
 }
 
-.download-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.download-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-.download-actions { display: flex; gap: 6px; }
+.download-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.download-title-group { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.download-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.download-selected-track {
+  font-size: 12px; color: var(--text2); display: flex; align-items: center; gap: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.track-highlight { color: var(--accent); font-weight: 500; }
+.download-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
 .ctrl { font-size: 14px; padding: 4px 8px; border-radius: 6px; opacity: 0.7; transition: opacity 0.1s, background 0.1s; }
 .ctrl:hover { opacity: 1; background: var(--surface2); }
@@ -304,5 +368,21 @@ async function onDeleteTorrent(d: any) {
 .ctrl-mini.btn-del:hover {
   background: var(--danger);
   color: #fff;
+}
+
+.progress-bar.is-metadata .progress-fill {
+  background: linear-gradient(90deg, #7c4dff 0%, #b388ff 50%, #7c4dff 100%) !important;
+  background-size: 200% 100% !important;
+  animation: metadata-pulse 1.8s infinite linear;
+}
+
+@keyframes metadata-pulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.meta-hint {
+  color: #b388ff;
+  font-style: italic;
 }
 </style>

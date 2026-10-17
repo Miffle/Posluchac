@@ -21,7 +21,7 @@ type X1337Searcher struct {
 
 func NewX1337Searcher() *X1337Searcher {
 	return &X1337Searcher{
-		client: &http.Client{Timeout: 20 * time.Second},
+		client: &http.Client{Timeout: 4 * time.Second},
 	}
 }
 

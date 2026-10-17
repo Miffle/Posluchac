@@ -4,6 +4,9 @@ export namespace audio {
 	    infoHash: string;
 	    filePath: string;
 	    fileName: string;
+	    title?: string;
+	    artist?: string;
+	    album?: string;
 	    coverPath?: string;
 	
 	    static createFrom(source: any = {}) {
@@ -15,6 +18,9 @@ export namespace audio {
 	        this.infoHash = source["infoHash"];
 	        this.filePath = source["filePath"];
 	        this.fileName = source["fileName"];
+	        this.title = source["title"];
+	        this.artist = source["artist"];
+	        this.album = source["album"];
 	        this.coverPath = source["coverPath"];
 	    }
 	}
@@ -286,6 +292,9 @@ export namespace torrent {
 	    uploadSpeed: number;
 	    seeders: number;
 	    state: string;
+	    addedAt: number;
+	    selectedCount: number;
+	    selectedTrack?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new DownloadProgress(source);
@@ -302,6 +311,9 @@ export namespace torrent {
 	        this.uploadSpeed = source["uploadSpeed"];
 	        this.seeders = source["seeders"];
 	        this.state = source["state"];
+	        this.addedAt = source["addedAt"];
+	        this.selectedCount = source["selectedCount"];
+	        this.selectedTrack = source["selectedTrack"];
 	    }
 	}
 	export class FileInfo {

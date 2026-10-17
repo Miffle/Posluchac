@@ -6,6 +6,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Result represents a single torrent search result.
@@ -48,9 +49,12 @@ func (m *MultiSearcher) Search(ctx context.Context, query string, limit int) []R
 	}
 	ch := make(chan partial, len(m.backends))
 
+	searchCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
 	for _, b := range m.backends {
 		go func(s Searcher) {
-			res, err := s.Search(ctx, query, limit)
+			res, err := s.Search(searchCtx, query, limit)
 			ch <- partial{res, err}
 		}(b)
 	}
