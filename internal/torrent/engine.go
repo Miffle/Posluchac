@@ -370,6 +370,8 @@ func (e *Engine) AddMagnetPending(magnetURI string) (string, []FileInfo, error) 
 	for _, f := range t.Files() {
 		f.SetPriority(torrent.PiecePriorityNone)
 	}
+	t.AllowDataDownload()
+	t.AllowDataUpload()
 
 	infoHash = t.InfoHash().HexString()
 
@@ -422,6 +424,8 @@ func (e *Engine) AddTorrentFilePending(filePath string) (string, []FileInfo, err
 	for _, f := range t.Files() {
 		f.SetPriority(torrent.PiecePriorityNone)
 	}
+	t.AllowDataDownload()
+	t.AllowDataUpload()
 
 	infoHash = t.InfoHash().HexString()
 
@@ -726,6 +730,7 @@ func (e *Engine) OpenFileReader(infoHash, fileName string) (io.ReadSeekCloser, e
 
 	// Make sure data transfer is allowed for streaming preview
 	t.AllowDataDownload()
+	t.AllowDataUpload()
 	t.AddTrackers(defaultPublicTrackers)
 
 	normTarget := normalizeRelPath(fileName)
@@ -742,16 +747,14 @@ func (e *Engine) OpenFileReader(infoHash, fileName string) (io.ReadSeekCloser, e
 			begin := f.BeginPieceIndex()
 			end := f.EndPieceIndex()
 
-			for i := begin; i < end && i < begin+4; i++ {
+			// Prioritize the initial audio chunks aggressively with PiecePriorityNow
+			for i := begin; i < end && i < begin+8; i++ {
 				t.Piece(i).SetPriority(torrent.PiecePriorityNow)
-			}
-			if end > begin {
-				t.Piece(end - 1).SetPriority(torrent.PiecePriorityNow)
 			}
 
 			r := f.NewReader()
 			r.SetResponsive()
-			r.SetReadahead(4 * 1024 * 1024)
+			r.SetReadahead(2 * 1024 * 1024)
 			return r, nil
 		}
 	}

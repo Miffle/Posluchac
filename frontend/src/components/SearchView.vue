@@ -489,15 +489,23 @@ async function confirmDownloadAll() {
   }
 }
 
+const streamingPath = ref('')
+
 async function streamTrack(file: TorrentFile) {
+  if (streamingPath.value) return
+  streamingPath.value = file.path
+  dialog.toast('Подключение к раздаче и буферизация трека...', 'info')
   try {
     await PlayTrack(pendingInfoHash.value, file.path)
+    dialog.toast(`Играет: ${file.name}`, 'success')
   } catch (e: any) {
     await dialog.alert({
       title: 'Ошибка воспроизведения',
       message: e?.message || String(e),
       type: 'error'
     })
+  } finally {
+    streamingPath.value = ''
   }
 }
 
@@ -774,10 +782,13 @@ function sourceBadgeClass(source: string) {
                     <button
                       v-if="isAudio(f.name)"
                       class="btn btn-ghost btn-xs stream-btn"
+                      :class="{ 'stream-btn-loading': streamingPath === f.path }"
+                      :disabled="streamingPath !== ''"
                       @click="streamTrack(f)"
                       title="Слушать онлайн прямо сейчас"
                     >
-                      ▶ Слушать
+                      <span v-if="streamingPath === f.path">⏳ Буферизация...</span>
+                      <span v-else>▶ Слушать</span>
                     </button>
                   </div>
                 </div>
@@ -1083,6 +1094,7 @@ function sourceBadgeClass(source: string) {
 .file-row-size { font-size: 12px; color: var(--text2); white-space: nowrap; }
 .stream-btn { color: var(--accent); }
 .stream-btn:hover { background: var(--surface2); }
+.stream-btn-loading { opacity: 0.8; color: #ffb74d !important; cursor: wait; }
 .empty-file-filter { text-align: center; padding: 40px; color: var(--text2); font-size: 13px; }
 
 .file-modal-footer {

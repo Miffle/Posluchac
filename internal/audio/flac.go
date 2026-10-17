@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/gopxl/beep"
 	"github.com/mewkiz/flac/frame"
@@ -95,18 +96,21 @@ func DecodeFlac(r io.Reader) (beep.StreamSeekCloser, beep.Format, error) {
 		return nil, beep.Format{}, fmt.Errorf("seek to audio start: %w", err)
 	}
 
-	fileSize, err := rs.Seek(0, io.SeekEnd)
-	if err != nil {
-		fileSize = dataStart + int64(streamInfo.NSamples)*4
-	}
-	_, _ = rs.Seek(dataStart, io.SeekStart)
-
-	audioSize := fileSize - dataStart
-	if audioSize <= 0 {
-		audioSize = 1
-	}
-
 	bps := streamInfo.BitsPerSample
+	var audioSize int64
+	if statter, ok := rs.(interface{ Stat() (os.FileInfo, error) }); ok {
+		if fi, err := statter.Stat(); err == nil && fi.Size() > dataStart {
+			audioSize = fi.Size() - dataStart
+		}
+	}
+	if audioSize <= 0 && streamInfo.NSamples > 0 {
+		rawBytes := int64(streamInfo.NSamples) * int64(streamInfo.NChannels) * int64(bps/8)
+		audioSize = int64(float64(rawBytes) * 0.55)
+	}
+	if audioSize <= 0 {
+		audioSize = 10 * 1024 * 1024
+	}
+
 	s := 1 << (bps - 1)
 	scale := 1 / float64(s)
 
