@@ -1,0 +1,153 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag to release (e.g. v1.0.1)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Posluchac
+    runs-on: windows-latest
+    env:
+      CGO_ENABLED: 0
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'frontend/package-lock.json'
+
+      - name: Install Wails CLI
+        shell: pwsh
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Determine Version & Release State
+        id: version_check
+        shell: pwsh
+        run: |
+          # 1. Triggered by Git Tag push (e.g. git push origin v1.0.1)
+          if ($env:GITHUB_REF -like "refs/tags/v*") {
+            $tag = $env:GITHUB_REF -replace "refs/tags/", ""
+            Write-Host "Triggered by tag: $tag"
+            echo "tag=$tag" >> $env:GITHUB_OUTPUT
+            echo "is_new_tag=false" >> $env:GITHUB_OUTPUT
+            echo "should_release=true" >> $env:GITHUB_OUTPUT
+            return
+          }
+
+          # 2. Triggered manually via workflow_dispatch with custom version
+          if ("${{ github.event.inputs.version }}" -ne "") {
+            $tag = "${{ github.event.inputs.version }}"
+            if (-not $tag.StartsWith("v")) { $tag = "v" + $tag }
+            Write-Host "Manual trigger for version: $tag"
+            echo "tag=$tag" >> $env:GITHUB_OUTPUT
+            echo "is_new_tag=true" >> $env:GITHUB_OUTPUT
+            echo "should_release=true" >> $env:GITHUB_OUTPUT
+            return
+          }
+
+          # 3. Triggered by push/merge to main: extract version from internal/updater/updater.go
+          $updaterContent = Get-Content internal/updater/updater.go -Raw
+          $rawVer = "1.0.0"
+          if ($updaterContent -match 'CurrentVersion\s*=\s*"([^"]+)"') {
+            $rawVer = $matches[1]
+          }
+          $tag = "v" + $rawVer.TrimStart("v")
+          Write-Host "Detected app version in codebase: $tag"
+
+          # Check if this tag is already released/tagged in git
+          $tagExists = git tag -l $tag
+          if ($tagExists) {
+            Write-Host "Tag $tag already exists in repository. Skipping release creation."
+            echo "should_release=false" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "New version $tag detected! Proceeding with release."
+            echo "tag=$tag" >> $env:GITHUB_OUTPUT
+            echo "is_new_tag=true" >> $env:GITHUB_OUTPUT
+            echo "should_release=true" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Install Frontend Dependencies
+        if: steps.version_check.outputs.should_release == 'true'
+        working-directory: ./frontend
+        run: |
+          npm ci
+
+      - name: Build Frontend
+        if: steps.version_check.outputs.should_release == 'true'
+        working-directory: ./frontend
+        run: |
+          npm run build
+
+      - name: Build Application with Wails
+        if: steps.version_check.outputs.should_release == 'true'
+        run: |
+          wails build -s -platform windows/amd64 -tags disable_libutp
+
+      - name: Prepare Release Assets
+        if: steps.version_check.outputs.should_release == 'true'
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version_check.outputs.tag }}"
+          New-Item -ItemType Directory -Force -Path "dist-release"
+
+          # Standalone executable
+          Copy-Item "build/bin/Posluchac.exe" "dist-release/Posluchac.exe"
+          Copy-Item "build/bin/Posluchac.exe" "dist-release/Posluchac-windows-amd64.exe"
+
+          # Zip archive
+          Compress-Archive -Path "build/bin/Posluchac.exe" -DestinationPath "dist-release/Posluchac-windows-amd64-$ver.zip" -Force
+
+          Get-ChildItem "dist-release"
+
+      - name: Tag Git Commit
+        if: steps.version_check.outputs.should_release == 'true' && steps.version_check.outputs.is_new_tag == 'true'
+        shell: pwsh
+        run: |
+          $tag = "${{ steps.version_check.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a $tag -m "Release $tag"
+          git push origin $tag
+
+      - name: Create GitHub Release
+        if: steps.version_check.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version_check.outputs.tag }}
+          name: Posluchac ${{ steps.version_check.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: |
+            dist-release/Posluchac.exe
+            dist-release/Posluchac-windows-amd64.exe
+            dist-release/Posluchac-windows-amd64-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

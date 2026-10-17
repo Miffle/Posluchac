@@ -1,0 +1,43 @@
+# Compiled binaries and builds
+build/bin/
+dist-release/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go cache & temporary files
+*.cover.jpg
+*.cover.png
+*.tmp
+
+# Frontend dependencies and builds
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/package.json.md5
+
+# Databases and cache
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# IDEs and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Scratch and nested templates
+scratch/
+torrent-player/
