@@ -43,7 +43,7 @@ onMounted(() => {
 
     <main class="main-content">
       <SearchView   v-show="currentView === 'search'"    :active="currentView === 'search'" />
-      <LibraryView  v-show="currentView === 'library'"   />
+      <LibraryView  v-show="currentView === 'library'"   :active="currentView === 'library'" />
       <DownloadsView v-show="currentView === 'downloads'" :active="currentView === 'downloads'" />
       <PlaylistView v-show="currentView === 'playlists'" />
     </main>

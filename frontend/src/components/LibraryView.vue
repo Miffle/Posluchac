@@ -25,7 +25,7 @@ interface Track {
   genre: string
   durationSec: number
   sizeBytes: number
-  coverPath: string
+  coverPath?: string
   favourite: boolean
 }
 
@@ -78,12 +78,32 @@ function handleTrackPlayClick(t: Track, list?: Track[]) {
   }
 }
 
+const props = defineProps<{
+  active?: boolean
+}>()
+
+watch(() => props.active, (isActive) => {
+  if (isActive) {
+    loadTracks()
+  }
+})
+
 async function loadTracks() {
   loading.value = true
   try {
-    const res = tab.value === 'favourites'
-      ? await GetFavourites()
-      : (query.value ? await SearchLibrary(query.value) : await GetLibrary())
+    let res: Track[] = []
+    if (tab.value === 'favourites') {
+      res = ((await GetFavourites()) || []) as Track[]
+      if (query.value.trim()) {
+        const qWords = query.value.toLowerCase().trim().split(/\s+/)
+        res = res.filter(t => {
+          const text = `${t.title} ${t.artist} ${t.album} ${t.fileName}`.toLowerCase()
+          return qWords.every(w => text.includes(w))
+        })
+      }
+    } else {
+      res = (query.value.trim() ? await SearchLibrary(query.value.trim()) : await GetLibrary()) as unknown as Track[]
+    }
     tracks.value = (res || []) as Track[]
   } finally {
     loading.value = false

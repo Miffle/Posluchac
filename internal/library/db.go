@@ -5,6 +5,7 @@ package library
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -133,20 +134,42 @@ func (l *DB) GetAllTracks() ([]Track, error) {
 	return scanTracks(rows)
 }
 
-// SearchTracks returns tracks matching query in title, artist, or album.
+// SearchTracks returns tracks matching query in title, artist, album, or file name.
+// Fully supports case-insensitive Unicode (Cyrillic, Latin, etc.) and multi-word queries.
 func (l *DB) SearchTracks(query string) ([]Track, error) {
-	pattern := "%" + query + "%"
-	rows, err := l.db.Query(`
-		SELECT id, info_hash, file_path, file_name, title, artist, album,
-		       year, genre, duration_sec, size_bytes, cover_path, favourite, added_at
-		FROM tracks
-		WHERE title LIKE ? OR artist LIKE ? OR album LIKE ?
-		ORDER BY artist, album, title`, pattern, pattern, pattern)
+	query = strings.TrimSpace(strings.ToLower(query))
+	if query == "" {
+		return l.GetAllTracks()
+	}
+
+	all, err := l.GetAllTracks()
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	return scanTracks(rows)
+
+	words := strings.Fields(query)
+	var matches []Track
+	for _, t := range all {
+		tTitle := strings.ToLower(t.Title)
+		tArtist := strings.ToLower(t.Artist)
+		tAlbum := strings.ToLower(t.Album)
+		tFile := strings.ToLower(t.FileName)
+
+		allWordsMatch := true
+		for _, w := range words {
+			if !strings.Contains(tTitle, w) &&
+				!strings.Contains(tArtist, w) &&
+				!strings.Contains(tAlbum, w) &&
+				!strings.Contains(tFile, w) {
+				allWordsMatch = false
+				break
+			}
+		}
+		if allWordsMatch {
+			matches = append(matches, t)
+		}
+	}
+	return matches, nil
 }
 
 // GetFavourites returns all favourite tracks.
