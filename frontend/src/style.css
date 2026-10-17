@@ -1,0 +1,5 @@
+/* Global resets and fonts are handled in App.vue :root */
+html, body, #app {
+  height: 100%;
+  overflow: hidden;
+}

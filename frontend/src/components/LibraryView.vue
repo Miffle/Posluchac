@@ -1,0 +1,863 @@
+<script lang="ts" setup>
+import { ref, computed, onMounted, watch } from 'vue'
+import {
+  GetLibrary,
+  GetFavourites,
+  SearchLibrary,
+  ToggleFavourite,
+  ScanLibrary,
+  DeleteLibraryTrack
+} from '../../wailsjs/go/main/App'
+import { usePlayerStore } from '../store/player'
+
+interface Track {
+  id: number
+  infoHash: string
+  filePath: string
+  fileName: string
+  title: string
+  artist: string
+  album: string
+  year: number
+  genre: string
+  durationSec: number
+  sizeBytes: number
+  coverPath: string
+  favourite: boolean
+}
+
+interface AlbumGroup {
+  name: string
+  year: number
+  coverPath?: string
+  tracks: Track[]
+}
+
+interface ArtistGroup {
+  name: string
+  tracks: Track[]
+  albums: AlbumGroup[]
+  coverPath?: string
+  totalDuration: number
+}
+
+type Tab = 'all' | 'artists' | 'favourites'
+const tab = ref<Tab>('all')
+const tracks = ref<Track[]>([])
+const query = ref('')
+const artistFilter = ref('')
+const selectedArtistName = ref('')
+const loading = ref(false)
+
+const player = usePlayerStore()
+
+async function loadTracks() {
+  loading.value = true
+  try {
+    const res = tab.value === 'favourites'
+      ? await GetFavourites()
+      : (query.value ? await SearchLibrary(query.value) : await GetLibrary())
+    tracks.value = (res || []) as Track[]
+  } finally {
+    loading.value = false
+  }
+}
+
+async function setTab(newTab: Tab) {
+  tab.value = newTab
+  await loadTracks()
+}
+
+async function refreshLibrary() {
+  loading.value = true
+  try {
+    await ScanLibrary()
+    await loadTracks()
+  } finally {
+    loading.value = false
+  }
+}
+
+async function deleteTrack(t: Track) {
+  const confirmed = confirm(`Удалить трек "${t.title || t.fileName}"?\n\nФайл будет удален из библиотеки и с диска.`)
+  if (!confirmed) return
+
+  try {
+    await DeleteLibraryTrack(t.id, true)
+    await loadTracks()
+  } catch (e: any) {
+    alert('Ошибка при удалении: ' + (e?.message || e))
+  }
+}
+
+onMounted(async () => {
+  await ScanLibrary()
+  await loadTracks()
+})
+
+async function toggleFav(track: Track) {
+  await ToggleFavourite(track.id)
+  track.favourite = !track.favourite
+}
+
+function playTrackInQueue(t: Track, list?: Track[]) {
+  const source = list && list.length > 0 ? list : tracks.value
+  const queue = source.map(item => ({
+    infoHash: item.infoHash,
+    filePath: item.filePath,
+    fileName: item.title || item.fileName,
+    coverPath: item.coverPath
+  }))
+  player.play(t.infoHash, t.filePath, queue)
+}
+
+function playArtist(artist: ArtistGroup) {
+  if (!artist.tracks.length) return
+  playTrackInQueue(artist.tracks[0], artist.tracks)
+}
+
+function playAlbum(albumTracks: Track[]) {
+  if (!albumTracks.length) return
+  playTrackInQueue(albumTracks[0], albumTracks)
+}
+
+function formatDuration(sec: number) {
+  if (!sec) return '--:--'
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function formatDurationTotal(sec: number): string {
+  if (!sec) return '0 мин'
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (h > 0) {
+    return `${h} ч ${m} мин`
+  }
+  return `${m} мин`
+}
+
+function pluralTracks(count: number): string {
+  const n = Math.abs(count) % 100
+  const n1 = n % 10
+  if (n > 10 && n < 20) return 'треков'
+  if (n1 > 1 && n1 < 5) return 'трека'
+  if (n1 === 1) return 'трек'
+  return 'треков'
+}
+
+function pluralAlbums(count: number): string {
+  const n = Math.abs(count) % 100
+  const n1 = n % 10
+  if (n > 10 && n < 20) return 'альбомов'
+  if (n1 > 1 && n1 < 5) return 'альбома'
+  if (n1 === 1) return 'альбом'
+  return 'альбомов'
+}
+
+// Group tracks by artist and album
+const artistsList = computed<ArtistGroup[]>(() => {
+  const map = new Map<string, {
+    name: string
+    tracks: Track[]
+    coverPath?: string
+    totalDuration: number
+  }>()
+
+  for (const t of tracks.value) {
+    const artistName = (t.artist || 'Неизвестный исполнитель').trim()
+    if (!map.has(artistName)) {
+      map.set(artistName, {
+        name: artistName,
+        tracks: [],
+        coverPath: undefined,
+        totalDuration: 0
+      })
+    }
+    const a = map.get(artistName)!
+    a.tracks.push(t)
+    a.totalDuration += t.durationSec || 0
+    if (!a.coverPath && t.coverPath) {
+      a.coverPath = t.coverPath
+    }
+  }
+
+  const result: ArtistGroup[] = Array.from(map.values()).map(a => {
+    const albumMap = new Map<string, { name: string; year: number; coverPath?: string; tracks: Track[] }>()
+    for (const t of a.tracks) {
+      const albName = (t.album || 'Синглы и отдельные треки').trim()
+      if (!albumMap.has(albName)) {
+        albumMap.set(albName, {
+          name: albName,
+          year: t.year || 0,
+          coverPath: t.coverPath,
+          tracks: []
+        })
+      }
+      const alb = albumMap.get(albName)!
+      alb.tracks.push(t)
+      if (!alb.coverPath && t.coverPath) {
+        alb.coverPath = t.coverPath
+      }
+      if (!alb.year && t.year) {
+        alb.year = t.year
+      }
+    }
+
+    const albums: AlbumGroup[] = Array.from(albumMap.values()).sort((x, y) => {
+      if (x.name === 'Синглы и отдельные треки') return 1
+      if (y.name === 'Синглы и отдельные треки') return -1
+      if (x.year && y.year && x.year !== y.year) return y.year - x.year
+      return x.name.localeCompare(y.name, undefined, { sensitivity: 'base' })
+    })
+
+    return {
+      name: a.name,
+      tracks: a.tracks,
+      albums,
+      coverPath: a.coverPath,
+      totalDuration: a.totalDuration
+    }
+  })
+
+  result.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
+  return result
+})
+
+const filteredArtists = computed(() => {
+  if (!artistFilter.value.trim()) return artistsList.value
+  const q = artistFilter.value.toLowerCase().trim()
+  return artistsList.value.filter(a => a.name.toLowerCase().includes(q))
+})
+
+const selectedArtist = computed(() => {
+  if (!filteredArtists.value.length) return null
+  const found = filteredArtists.value.find(a => a.name === selectedArtistName.value)
+  return found || filteredArtists.value[0] || null
+})
+
+watch(filteredArtists, (newArtists) => {
+  if (!newArtists.length) {
+    selectedArtistName.value = ''
+    return
+  }
+  if (!selectedArtistName.value || !newArtists.some(a => a.name === selectedArtistName.value)) {
+    selectedArtistName.value = newArtists[0].name
+  }
+}, { immediate: true })
+</script>
+
+<template>
+  <div class="library-view">
+    <div class="view-header">
+      <div class="header-left">
+        <h1>Библиотека</h1>
+        <div class="tabs">
+          <button :class="['tab', { active: tab === 'all' }]" @click="setTab('all')">Все треки</button>
+          <button :class="['tab', { active: tab === 'artists' }]" @click="setTab('artists')">По исполнителям</button>
+          <button :class="['tab', { active: tab === 'favourites' }]" @click="setTab('favourites')">❤️ Избранное</button>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm scan-btn" @click="refreshLibrary" title="Просканировать папку музыки на новые файлы">
+        🔄 Обновить папку
+      </button>
+    </div>
+
+    <div class="search-row">
+      <input v-model="query" type="text" placeholder="Поиск в библиотеке (исполнитель, альбом, трек)..." @input="loadTracks" />
+    </div>
+
+    <!-- Empty State -->
+    <div class="empty-state" v-if="!loading && !tracks.length">
+      <div class="empty-icon">🎵</div>
+      <p v-if="tab === 'favourites'">Избранных треков пока нет</p>
+      <p v-else>Библиотека пуста</p>
+      <p class="empty-hint" v-if="tab === 'favourites'">
+        Нажмите на сердечко рядом с любимым треком, чтобы добавить его в избранное!
+      </p>
+      <p class="empty-hint" v-else>
+        Скачивайте треки через поиск или просто скопируйте любые аудиофайлы в папку <code>Music/Posluchac</code> (или <code>Music/TorrentPlayer</code>) — они появятся здесь автоматически!
+      </p>
+    </div>
+
+    <!-- Tab: По исполнителям -->
+    <div class="artists-layout" v-else-if="tab === 'artists'">
+      <!-- Left sidebar: artists list -->
+      <div class="artists-sidebar">
+        <div class="artists-search" v-if="artistsList.length > 5">
+          <input v-model="artistFilter" type="text" placeholder="Фильтр исполнителей..." />
+        </div>
+        <div class="artists-list-header">
+          <span>Исполнители ({{ filteredArtists.length }})</span>
+        </div>
+        <div class="artists-list">
+          <div
+            v-for="a in filteredArtists"
+            :key="a.name"
+            class="artist-item"
+            :class="{ active: selectedArtist?.name === a.name }"
+            @click="selectedArtistName = a.name"
+          >
+            <div class="artist-avatar">
+              <img
+                v-if="a.coverPath"
+                :src="'/api/cover?path=' + encodeURIComponent(a.coverPath)"
+                class="artist-avatar-img"
+                alt="Avatar"
+                @error="($event.target as HTMLElement).style.display = 'none'"
+              />
+              <span v-else class="artist-avatar-placeholder">👤</span>
+            </div>
+            <div class="artist-meta">
+              <div class="artist-name-label" :title="a.name">{{ a.name }}</div>
+              <div class="artist-track-count">{{ a.tracks.length }} {{ pluralTracks(a.tracks.length) }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right panel: selected artist discography -->
+      <div class="artist-details" v-if="selectedArtist">
+        <!-- Hero header -->
+        <div class="artist-hero">
+          <div class="artist-hero-cover">
+            <img
+              v-if="selectedArtist.coverPath"
+              :src="'/api/cover?path=' + encodeURIComponent(selectedArtist.coverPath)"
+              class="hero-img"
+              alt="Artist"
+            />
+            <span v-else class="hero-placeholder">👤</span>
+          </div>
+          <div class="artist-hero-info">
+            <div class="hero-subtitle">Исполнитель</div>
+            <h2 class="hero-name">{{ selectedArtist.name }}</h2>
+            <div class="hero-stats">
+              <span>{{ selectedArtist.tracks.length }} {{ pluralTracks(selectedArtist.tracks.length) }}</span>
+              <span class="meta-dot">·</span>
+              <span>{{ formatDurationTotal(selectedArtist.totalDuration) }}</span>
+              <span class="meta-dot">·</span>
+              <span>{{ selectedArtist.albums.length }} {{ pluralAlbums(selectedArtist.albums.length) }}</span>
+            </div>
+            <div class="hero-actions">
+              <button class="btn btn-accent btn-play-all" @click="playArtist(selectedArtist)">
+                ▶ Слушать все треки
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Albums list -->
+        <div class="artist-albums">
+          <div
+            v-for="album in selectedArtist.albums"
+            :key="album.name"
+            class="album-section"
+          >
+            <div class="album-header">
+              <div class="album-cover-box">
+                <img
+                  v-if="album.coverPath"
+                  :src="'/api/cover?path=' + encodeURIComponent(album.coverPath)"
+                  class="album-cover-img"
+                  alt="Album"
+                  @error="($event.target as HTMLElement).style.display = 'none'"
+                />
+                <span v-else class="album-cover-placeholder">💿</span>
+              </div>
+              <div class="album-info">
+                <div class="album-title">{{ album.name }}</div>
+                <div class="album-meta">
+                  <span v-if="album.year" class="album-year">{{ album.year }}</span>
+                  <span v-if="album.year" class="meta-dot">·</span>
+                  <span>{{ album.tracks.length }} {{ pluralTracks(album.tracks.length) }}</span>
+                </div>
+              </div>
+              <button class="btn btn-ghost btn-sm album-play-btn" @click="playAlbum(album.tracks)" title="Слушать этот альбом">
+                ▶ Слушать альбом
+              </button>
+            </div>
+
+            <div class="album-track-list">
+              <div
+                v-for="(t, idx) in album.tracks"
+                :key="t.id"
+                class="track-row album-row"
+                @dblclick="playTrackInQueue(t, selectedArtist.tracks)"
+                :class="{ playing: player.status.track?.filePath === t.filePath }"
+              >
+                <span class="track-num">{{ idx + 1 }}</span>
+                <button class="fav-btn" @click.stop="toggleFav(t)" :title="t.favourite ? 'Убрать из избранного' : 'В избранное'">
+                  {{ t.favourite ? '❤️' : '🤍' }}
+                </button>
+                <div class="track-info">
+                  <div class="track-title">{{ t.title || t.fileName }}</div>
+                </div>
+                <div class="track-genre" v-if="t.genre">{{ t.genre }}</div>
+                <div class="track-duration">{{ formatDuration(t.durationSec) }}</div>
+                <div class="track-actions">
+                  <button class="play-btn" @click.stop="playTrackInQueue(t, selectedArtist.tracks)">▶</button>
+                  <button class="del-btn" @click.stop="deleteTrack(t)" title="Удалить трек">🗑</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="empty-state" v-else>
+        <div class="empty-icon">👥</div>
+        <p>Исполнители не найдены</p>
+      </div>
+    </div>
+
+    <!-- Tab: Все треки / Избранное (flat list) -->
+    <div class="all-tracks-container" v-else>
+      <div class="tracks-toolbar">
+        <span class="tracks-total">{{ tracks.length }} {{ pluralTracks(tracks.length) }}</span>
+        <button class="btn btn-accent btn-sm" @click="playTrackInQueue(tracks[0])" v-if="tracks.length">
+          ▶ Воспроизвести все
+        </button>
+      </div>
+
+      <div class="track-list">
+        <div
+          class="track-row flat-row"
+          v-for="(t, idx) in tracks"
+          :key="t.id"
+          @dblclick="playTrackInQueue(t)"
+          :class="{ playing: player.status.track?.filePath === t.filePath }"
+        >
+          <span class="track-num">{{ idx + 1 }}</span>
+          <button class="fav-btn" @click.stop="toggleFav(t)" :title="t.favourite ? 'Убрать из избранного' : 'В избранное'">
+            {{ t.favourite ? '❤️' : '🤍' }}
+          </button>
+          <div class="track-cover-thumb-box">
+            <img
+              v-if="t.coverPath"
+              :src="'/api/cover?path=' + encodeURIComponent(t.coverPath)"
+              class="track-cover-thumb"
+              alt="Cover"
+              @error="($event.target as HTMLElement).style.display = 'none'"
+            />
+            <span v-else class="track-cover-placeholder">🎵</span>
+          </div>
+          <div class="track-info">
+            <div class="track-title">{{ t.title || t.fileName }}</div>
+            <div class="track-meta-line">
+              <span class="track-artist-name">{{ t.artist || 'Неизвестный исполнитель' }}</span>
+              <span v-if="t.album" class="meta-dot">·</span>
+              <span v-if="t.album" class="track-album-name">{{ t.album }}{{ t.year ? ` (${t.year})` : '' }}</span>
+            </div>
+          </div>
+          <div class="track-genre" v-if="t.genre">{{ t.genre }}</div>
+          <div class="track-duration">{{ formatDuration(t.durationSec) }}</div>
+          <div class="track-actions">
+            <button class="play-btn" @click.stop="playTrackInQueue(t)">▶</button>
+            <button class="del-btn" @click.stop="deleteTrack(t)" title="Удалить трек">🗑</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.library-view { display: flex; flex-direction: column; gap: 20px; }
+
+.view-header { display: flex; justify-content: space-between; align-items: center; }
+.header-left { display: flex; align-items: center; gap: 20px; }
+.view-header h1 { font-size: 24px; font-weight: 700; }
+.scan-btn { display: flex; align-items: center; gap: 6px; }
+
+.tabs { display: flex; gap: 6px; }
+.tab { padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: 600; color: var(--text2); background: var(--surface); transition: all 0.12s; }
+.tab:hover { color: var(--text); }
+.tab.active { background: var(--accent); color: #000; }
+
+.search-row input { width: 100%; }
+
+.empty-state { text-align: center; padding: 60px 0; color: var(--text2); }
+.empty-icon { font-size: 52px; margin-bottom: 14px; }
+.empty-hint { font-size: 13px; margin-top: 8px; opacity: 0.7; max-width: 500px; margin-left: auto; margin-right: auto; line-height: 1.5; }
+.empty-hint code { color: var(--accent); background: var(--bg3); padding: 2px 6px; border-radius: 4px; }
+
+/* Tracks toolbar in flat view */
+.tracks-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.tracks-total {
+  font-size: 13px;
+  color: var(--text2);
+  font-weight: 600;
+}
+
+/* Base Track Row */
+.track-list { display: flex; flex-direction: column; gap: 2px; }
+.track-row {
+  display: grid;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.track-row:hover { background: var(--surface); }
+.track-row.playing { background: var(--surface); }
+.track-row.playing .track-title { color: var(--accent); }
+
+/* Flat row in All Tracks / Favourites */
+.flat-row {
+  grid-template-columns: 28px auto 36px 1fr auto auto auto;
+}
+
+/* Album row inside artist discography */
+.album-row {
+  grid-template-columns: 28px auto 1fr auto auto auto;
+}
+
+.track-num {
+  font-size: 13px;
+  color: var(--text2);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.track-cover-thumb-box {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.track-cover-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.track-cover-placeholder {
+  font-size: 18px;
+  opacity: 0.7;
+}
+
+.fav-btn { font-size: 14px; opacity: 0.4; transition: opacity 0.1s; flex-shrink: 0; }
+.track-row:hover .fav-btn, .fav-btn:hover { opacity: 1; }
+
+.track-info { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.track-title {
+  font-size: 14px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-meta-line {
+  font-size: 12px;
+  color: var(--text2);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-artist-name { color: var(--text2); font-weight: 500; }
+.track-album-name { opacity: 0.8; }
+.meta-dot { opacity: 0.5; font-size: 11px; }
+
+.track-genre {
+  font-size: 12px;
+  color: var(--text2);
+  opacity: 0.8;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.track-duration { font-size: 13px; color: var(--text2); font-variant-numeric: tabular-nums; }
+
+.track-actions { display: flex; align-items: center; gap: 8px; }
+
+.play-btn {
+  font-size: 12px; padding: 4px 12px;
+  background: var(--accent); color: #000;
+  border-radius: 12px; font-weight: 700;
+  opacity: 0; transition: opacity 0.1s;
+}
+.track-row:hover .play-btn { opacity: 1; }
+
+.del-btn {
+  font-size: 14px; opacity: 0; padding: 4px; border-radius: 6px;
+  transition: opacity 0.1s, background 0.1s;
+}
+.track-row:hover .del-btn { opacity: 0.6; }
+.del-btn:hover { opacity: 1 !important; background: var(--danger); }
+
+/* ─── By Artists Tab Layout ─── */
+.artists-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.artists-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+}
+
+.artists-search input {
+  width: 100%;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
+.artists-list-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text2);
+  padding: 4px 6px;
+}
+
+.artists-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.artist-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s;
+  border-left: 3px solid transparent;
+}
+.artist-item:hover {
+  background: var(--surface);
+}
+.artist-item.active {
+  background: var(--surface);
+  border-left-color: var(--accent);
+}
+
+.artist-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.artist-avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.artist-avatar-placeholder {
+  font-size: 18px;
+  opacity: 0.7;
+}
+
+.artist-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.artist-name-label {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.artist-track-count {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 1px;
+}
+
+/* Selected Artist Details Pane */
+.artist-details {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+
+.artist-hero {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  background: linear-gradient(135deg, var(--surface) 0%, var(--bg2) 100%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px 24px;
+}
+.artist-hero-cover {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.hero-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hero-placeholder {
+  font-size: 42px;
+  opacity: 0.6;
+}
+
+.artist-hero-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hero-subtitle {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.hero-name {
+  font-size: 24px;
+  font-weight: 800;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hero-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text2);
+  margin-bottom: 14px;
+}
+.hero-actions {
+  display: flex;
+  gap: 10px;
+}
+.btn-play-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding: 8px 18px;
+  border-radius: 20px;
+  font-weight: 700;
+}
+
+/* Albums */
+.artist-albums {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+.album-section {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.album-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.album-cover-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.album-cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.album-cover-placeholder {
+  font-size: 20px;
+  opacity: 0.7;
+}
+.album-info {
+  flex: 1;
+  min-width: 0;
+}
+.album-title {
+  font-size: 15px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.album-meta {
+  font-size: 12px;
+  color: var(--text2);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 2px;
+}
+.album-year {
+  color: var(--accent);
+  font-weight: 600;
+}
+.album-play-btn {
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 16px;
+}
+.album-track-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+</style>
