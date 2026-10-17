@@ -3,6 +3,7 @@
 package updater
 
 import (
+	"archive/zip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,11 +13,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 const (
-	CurrentVersion = "1.0.1"
+	CurrentVersion = "1.0.0"
 	RepoOwner      = "Miffle"
 	RepoName       = "Posluchac"
 )
@@ -67,7 +69,6 @@ func CheckForUpdates() (*UpdateInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		// No releases published yet
 		return &UpdateInfo{
 			CurrentVersion: CurrentVersion,
 			LatestVersion:  CurrentVersion,
@@ -88,20 +89,41 @@ func CheckForUpdates() (*UpdateInfo, error) {
 	latestClean := strings.TrimPrefix(strings.TrimPrefix(rel.TagName, "v"), "V")
 	hasUpdate := IsNewerVersion(latestClean, CurrentVersion)
 
-	var downloadURL string
-	var assetSize int64
+	// Score candidates: prefer direct Posluchac.exe, then any .exe, then .zip
+	var bestURL string
+	var bestSize int64
+	bestScore := -1
+
 	for _, a := range rel.Assets {
 		low := strings.ToLower(a.Name)
-		if strings.HasSuffix(low, ".exe") || strings.HasSuffix(low, ".zip") {
-			downloadURL = a.DownloadURL
-			assetSize = a.Size
-			if strings.Contains(low, "posluchac") {
-				break
-			}
+		score := 0
+		if strings.HasSuffix(low, ".exe") {
+			score += 1000
+		} else if strings.HasSuffix(low, ".zip") {
+			score += 500
+		} else {
+			continue
+		}
+
+		if low == "posluchac.exe" {
+			score += 300
+		} else if strings.Contains(low, "posluchac") {
+			score += 100
+		}
+
+		if strings.Contains(low, "windows") || strings.Contains(low, "amd64") {
+			score += 50
+		}
+
+		if score > bestScore {
+			bestScore = score
+			bestURL = a.DownloadURL
+			bestSize = a.Size
 		}
 	}
-	if downloadURL == "" {
-		downloadURL = rel.HTMLURL
+
+	if bestURL == "" {
+		bestURL = rel.HTMLURL
 	}
 
 	publishedStr := ""
@@ -116,8 +138,8 @@ func CheckForUpdates() (*UpdateInfo, error) {
 		ReleaseName:    rel.Name,
 		ReleaseNotes:   rel.Body,
 		ReleaseURL:     rel.HTMLURL,
-		DownloadURL:    downloadURL,
-		AssetSize:      assetSize,
+		DownloadURL:    bestURL,
+		AssetSize:      bestSize,
 		PublishedAt:    publishedStr,
 	}, nil
 }
@@ -163,21 +185,35 @@ func parseVersion(v string) []int {
 	return res
 }
 
-// ApplyUpdate downloads the new executable and restarts the application on Windows.
+// ApplyUpdate downloads the new executable (or extracts it from zip) and restarts the application on Windows.
 func ApplyUpdate(downloadURL string) error {
-	if !strings.HasSuffix(strings.ToLower(downloadURL), ".exe") {
-		return OpenURL(downloadURL)
+	low := strings.ToLower(downloadURL)
+	isExe := strings.HasSuffix(low, ".exe")
+	isZip := strings.HasSuffix(low, ".zip")
+
+	if !isExe && !isZip {
+		_ = OpenURL(downloadURL)
+		return fmt.Errorf("автоматическое обновление недоступно для этого формата файлов; открыта страница релиза в браузере")
 	}
 
 	currentExe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("определение пути программы: %w", err)
 	}
+	currentExe = filepath.Clean(currentExe)
 
 	tempDir := os.TempDir()
 	tempExe := filepath.Join(tempDir, fmt.Sprintf("Posluchac-update-%d.exe", time.Now().UnixNano()))
 
-	resp, err := http.Get(downloadURL)
+	// Download asset
+	req, err := http.NewRequest(http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return fmt.Errorf("создание запроса: %w", err)
+	}
+	req.Header.Set("User-Agent", "Posluchac/"+CurrentVersion)
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("скачивание обновления: %w", err)
 	}
@@ -187,28 +223,85 @@ func ApplyUpdate(downloadURL string) error {
 		return fmt.Errorf("сервер вернул статус %d при скачивании", resp.StatusCode)
 	}
 
-	out, err := os.Create(tempExe)
-	if err != nil {
-		return fmt.Errorf("создание временного файла: %w", err)
-	}
-	_, err = io.Copy(out, resp.Body)
-	out.Close()
-	if err != nil {
-		return fmt.Errorf("запись файла обновления: %w", err)
+	if isZip {
+		tempZip := filepath.Join(tempDir, fmt.Sprintf("Posluchac-update-%d.zip", time.Now().UnixNano()))
+		zipFile, err := os.Create(tempZip)
+		if err != nil {
+			return fmt.Errorf("создание временного zip-файла: %w", err)
+		}
+		if _, err := io.Copy(zipFile, resp.Body); err != nil {
+			zipFile.Close()
+			_ = os.Remove(tempZip)
+			return fmt.Errorf("сохранение архива обновления: %w", err)
+		}
+		zipFile.Close()
+
+		err = extractExeFromZip(tempZip, tempExe)
+		_ = os.Remove(tempZip)
+		if err != nil {
+			return err
+		}
+	} else {
+		out, err := os.Create(tempExe)
+		if err != nil {
+			return fmt.Errorf("создание временного exe: %w", err)
+		}
+		if _, err := io.Copy(out, resp.Body); err != nil {
+			out.Close()
+			_ = os.Remove(tempExe)
+			return fmt.Errorf("сохранение исполняемого файла: %w", err)
+		}
+		out.Close()
 	}
 
+	// Create batch updater script
+	currentPID := os.Getpid()
+	targetDir := filepath.Dir(currentExe)
 	batPath := filepath.Join(tempDir, fmt.Sprintf("update-posluchac-%d.bat", time.Now().UnixNano()))
-	batContent := fmt.Sprintf(`@echo off
-timeout /t 1 /nobreak >nul
-:retry
-move /y "%s" "%s" >nul 2>&1
+	logPath := filepath.Join(tempDir, "posluchac-update.log")
+
+	replacer := strings.NewReplacer(
+		"{{PID}}", strconv.Itoa(currentPID),
+		"{{TEMP_EXE}}", tempExe,
+		"{{TARGET_EXE}}", currentExe,
+		"{{TARGET_DIR}}", targetDir,
+		"{{LOG_FILE}}", logPath,
+	)
+
+	batTemplate := `@echo off
+setlocal enabledelayedexpansion
+echo [%date% %time%] Starting Posluchac updater for PID {{PID}} > "{{LOG_FILE}}"
+
+set /a attempts=0
+:wait_pid
+tasklist /fi "PID eq {{PID}}" 2>nul | findstr /i "{{PID}}" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    set /a attempts+=1
+    if !attempts! leq 10 goto wait_pid
+    taskkill /F /PID {{PID}} >nul 2>&1
+)
+
+set /a copy_attempts=0
+:retry_copy
+copy /y "{{TEMP_EXE}}" "{{TARGET_EXE}}" >> "{{LOG_FILE}}" 2>&1
 if errorlevel 1 (
     timeout /t 1 /nobreak >nul
-    goto retry
+    set /a copy_attempts+=1
+    if !copy_attempts! leq 20 goto retry_copy
+    echo [%date% %time%] ERROR: Failed to replace {{TARGET_EXE}} >> "{{LOG_FILE}}"
+    exit /b 1
 )
-start "" "%s"
-del "%%~f0"
-`, tempExe, currentExe, currentExe)
+
+echo [%date% %time%] Successfully copied new binary >> "{{LOG_FILE}}"
+del /f /q "{{TEMP_EXE}}" >nul 2>&1
+
+cd /d "{{TARGET_DIR}}"
+echo [%date% %time%] Starting updated Posluchac... >> "{{LOG_FILE}}"
+start "" "{{TARGET_EXE}}"
+del /f /q "%~f0"
+`
+	batContent := replacer.Replace(batTemplate)
 
 	if err := os.WriteFile(batPath, []byte(batContent), 0o755); err != nil {
 		return fmt.Errorf("создание скрипта обновления: %w", err)
@@ -216,14 +309,63 @@ del "%%~f0"
 
 	cmd := exec.Command("cmd.exe", "/c", batPath)
 	cmd.Dir = tempDir
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000 | 0x00000200, // CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+	}
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("запуск обновления: %w", err)
+		return fmt.Errorf("запуск процесса обновления: %w", err)
 	}
 
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		os.Exit(0)
 	}()
+
+	return nil
+}
+
+// extractExeFromZip extracts Posluchac.exe (or first .exe found) from a zip archive.
+func extractExeFromZip(zipPath, destExePath string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("чтение zip-архива: %w", err)
+	}
+	defer r.Close()
+
+	var targetFile *zip.File
+	for _, f := range r.File {
+		low := strings.ToLower(f.Name)
+		if strings.HasSuffix(low, ".exe") {
+			if strings.EqualFold(filepath.Base(low), "posluchac.exe") {
+				targetFile = f
+				break
+			}
+			if targetFile == nil {
+				targetFile = f
+			}
+		}
+	}
+
+	if targetFile == nil {
+		return fmt.Errorf("в архиве обновления не найден файл .exe")
+	}
+
+	rc, err := targetFile.Open()
+	if err != nil {
+		return fmt.Errorf("открытие .exe из архива: %w", err)
+	}
+	defer rc.Close()
+
+	out, err := os.Create(destExePath)
+	if err != nil {
+		return fmt.Errorf("создание временного exe: %w", err)
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, rc); err != nil {
+		return fmt.Errorf("распаковка .exe: %w", err)
+	}
 
 	return nil
 }

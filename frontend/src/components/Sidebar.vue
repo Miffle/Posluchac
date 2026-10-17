@@ -77,13 +77,15 @@ const items: { id: View; label: string; icon: string }[] = [
 <style scoped>
 .sidebar {
   grid-column: 1;
-  grid-row: 1 / 3;
+  grid-row: 1;
   background: var(--bg2);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 20px 12px;
+  padding: 16px 12px 12px;
   gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .logo {
@@ -124,6 +126,7 @@ nav { display: flex; flex-direction: column; gap: 2px; }
   gap: 8px;
   padding: 10px 6px 0;
   border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .update-banner {
