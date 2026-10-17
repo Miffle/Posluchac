@@ -29,16 +29,17 @@ import (
 // App holds all backend services and is bound to the Wails runtime.
 // Every exported method on App is callable from the frontend via JS.
 type App struct {
-	ctx         context.Context
-	engine      *torrentpkg.Engine
-	player      *audio.Player
-	library     *library.DB
-	sources     *sources.Manager
-	searcher    *search.MultiSearcher
-	rutracker   *search.RutrackerSearcher
-	hotkeys     *hotkeys.Manager
-	dataDir     string
-	downloadDir string
+	ctx          context.Context
+	engine       *torrentpkg.Engine
+	player       *audio.Player
+	library      *library.DB
+	sources      *sources.Manager
+	searcher     *search.MultiSearcher
+	rutracker    *search.RutrackerSearcher
+	hotkeys      *hotkeys.Manager
+	dataDir      string
+	downloadDir  string
+	readySources chan struct{}
 }
 
 func NewApp() *App {
@@ -60,7 +61,11 @@ func NewApp() *App {
 		}
 	}
 
-	return &App{dataDir: dataDir, downloadDir: dlDir}
+	return &App{
+		dataDir:      dataDir,
+		downloadDir:  dlDir,
+		readySources: make(chan struct{}),
+	}
 }
 
 // startup is called by Wails when the app starts.
@@ -82,7 +87,13 @@ func (a *App) startup(ctx context.Context) {
 	var sqlDB *sql.DB
 	if a.library != nil {
 		sqlDB = a.library.SQLDB()
+		var sErr error
+		a.sources, sErr = sources.NewManager(sqlDB)
+		if sErr != nil {
+			fmt.Println("sources manager error:", sErr)
+		}
 	}
+	close(a.readySources)
 
 	a.engine, err = torrentpkg.NewEngine(cacheDir, dlDir, sqlDB)
 	if err != nil {
@@ -92,13 +103,6 @@ func (a *App) startup(ctx context.Context) {
 	a.player, err = audio.NewPlayer()
 	if err != nil {
 		fmt.Println("audio player error:", err)
-	}
-
-	if sqlDB != nil {
-		a.sources, err = sources.NewManager(sqlDB)
-		if err != nil {
-			fmt.Println("sources manager error:", err)
-		}
 	}
 
 	// Build search backends
@@ -134,10 +138,22 @@ func (a *App) shutdown(_ context.Context) {
 	_ = a.library.Close()
 }
 
+// waitForSources waits for the sources manager to be initialized.
+func (a *App) waitForSources() {
+	if a.readySources == nil {
+		return
+	}
+	select {
+	case <-a.readySources:
+	case <-time.After(5 * time.Second):
+	}
+}
+
 // ─── Search ──────────────────────────────────────────────────────────────────
 
 // Search queries all indexed JSON sources and torrent backends.
 func (a *App) Search(query string) []search.Result {
+	a.waitForSources()
 	var results []search.Result
 	if a.sources != nil {
 		results = append(results, a.sources.Search(a.ctx, query, 50)...)
@@ -148,30 +164,34 @@ func (a *App) Search(query string) []search.Result {
 
 // AddSource downloads and indexes a remote JSON source (e.g. from GitHub Raw).
 func (a *App) AddSource(url string) (*sources.Source, error) {
+	a.waitForSources()
 	if a.sources == nil {
-		return nil, fmt.Errorf("sources manager not ready")
+		return nil, fmt.Errorf("источники ещё инициализируются")
 	}
 	return a.sources.AddSource(url)
 }
 
 // DeleteSource removes a source and its indexed downloads from the database.
 func (a *App) DeleteSource(id int64) error {
+	a.waitForSources()
 	if a.sources == nil {
-		return fmt.Errorf("sources manager not ready")
+		return fmt.Errorf("источники ещё инициализируются")
 	}
 	return a.sources.DeleteSource(id)
 }
 
 // ListSources returns all registered download sources.
 func (a *App) ListSources() ([]sources.Source, error) {
+	a.waitForSources()
 	if a.sources == nil {
-		return nil, nil
+		return nil, fmt.Errorf("источники ещё инициализируются")
 	}
 	return a.sources.ListSources()
 }
 
 // SyncSources updates all sources from their remote URLs.
 func (a *App) SyncSources() error {
+	a.waitForSources()
 	if a.sources == nil {
 		return nil
 	}

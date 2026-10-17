@@ -42,9 +42,9 @@ onMounted(() => {
     <Sidebar :current-view="currentView" @navigate="currentView = $event" />
 
     <main class="main-content">
-      <SearchView   v-show="currentView === 'search'"    />
+      <SearchView   v-show="currentView === 'search'"    :active="currentView === 'search'" />
       <LibraryView  v-show="currentView === 'library'"   />
-      <DownloadsView v-show="currentView === 'downloads'" />
+      <DownloadsView v-show="currentView === 'downloads'" :active="currentView === 'downloads'" />
       <PlaylistView v-show="currentView === 'playlists'" />
     </main>
 

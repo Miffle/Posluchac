@@ -72,6 +72,10 @@ const fileSearch = ref('')
 const audioOnlyFilter = ref(true)
 const collapsedFolders = ref<Record<string, boolean>>({})
 
+const props = defineProps<{
+  active?: boolean
+}>()
+
 const downloadsStore = useDownloadsStore()
 const playerStore = usePlayerStore()
 const dialog = useDialogStore()
@@ -80,12 +84,37 @@ onMounted(async () => {
   await loadSources()
 })
 
-async function loadSources() {
-  try {
-    const res = await ListSources()
-    sourcesList.value = (res || []) as Source[]
-  } catch {
-    /* ignore */
+watch(() => props.active, (isActive) => {
+  if (isActive) {
+    loadSources()
+  }
+})
+
+watch(showSourcesModal, (open) => {
+  if (open) {
+    loadSources()
+  }
+})
+
+function openSourcesModal() {
+  showSourcesModal.value = true
+  loadSources()
+}
+
+async function loadSources(retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await ListSources()
+      sourcesList.value = (res || []) as Source[]
+      if (sourcesList.value.length > 0) {
+        return
+      }
+    } catch {
+      /* ignore */
+    }
+    if (i < retries - 1) {
+      await new Promise(r => setTimeout(r, 600))
+    }
   }
 }
 
@@ -96,7 +125,7 @@ async function addSourceHandler() {
   try {
     await AddSource(newSourceUrl.value.trim())
     newSourceUrl.value = ''
-    await loadSources()
+    await loadSources(1)
   } catch (e: any) {
     sourceError.value = e?.message || 'Ошибка загрузки источника'
   } finally {
@@ -113,14 +142,14 @@ async function removeSourceHandler(id: number) {
   })
   if (!ok) return
   await DeleteSource(id)
-  await loadSources()
+  await loadSources(1)
 }
 
 async function syncSourcesHandler() {
   addingSource.value = true
   try {
     await SyncSources()
-    await loadSources()
+    await loadSources(1)
   } finally {
     addingSource.value = false
   }
@@ -128,6 +157,9 @@ async function syncSourcesHandler() {
 
 async function doSearch() {
   if (!query.value.trim()) return
+  if (sourcesList.value.length === 0) {
+    loadSources(1)
+  }
   loading.value = true
   error.value = ''
   results.value = []
@@ -497,7 +529,7 @@ function sourceBadgeClass(source: string) {
         <button class="btn btn-ghost" @click="showMagnetInput = !showMagnetInput">🔗 Magnet</button>
         <button
           class="btn btn-accent"
-          @click="showSourcesModal = true"
+          @click="openSourcesModal"
           title="Управление JSON источниками загрузок"
         >
           📦 Источники ({{ sourcesList.length }})

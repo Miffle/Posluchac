@@ -172,7 +172,8 @@ func (e *Engine) saveTorrent(infoHash, name, magnetURI string, selectedPaths []s
 			name = CASE WHEN excluded.name != '' THEN excluded.name ELSE managed_torrents.name END,
 			magnet_uri = CASE WHEN excluded.magnet_uri != '' THEN excluded.magnet_uri ELSE managed_torrents.magnet_uri END,
 			selected_paths = excluded.selected_paths,
-			state = excluded.state
+			state = excluded.state,
+			created_at = CURRENT_TIMESTAMP
 	`, infoHash, name, magnetURI, string(pathsJSON), string(state))
 }
 
@@ -492,6 +493,8 @@ func (e *Engine) DownloadSelectedFiles(infoHash string, selectedPaths []string) 
 				mt.SelectedPaths = append(mt.SelectedPaths, p)
 			}
 		}
+		mt.AddedAt = time.Now()
+		mt.State = StateDownloading
 	}
 	e.mu.Unlock()
 

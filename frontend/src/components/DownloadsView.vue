@@ -1,14 +1,24 @@
 <script lang="ts" setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useDownloadsStore } from '../store/downloads'
 import { usePlayerStore } from '../store/player'
 import { useDialogStore } from '../store/dialog'
 import { GetDownloadDir, OpenDownloadFolder, OpenFileInFolder } from '../../wailsjs/go/main/App'
 
+const props = defineProps<{
+  active?: boolean
+}>()
+
 const downloads = useDownloadsStore()
 const player = usePlayerStore()
 const dialog = useDialogStore()
 const downloadDir = ref('')
+
+watch(() => props.active, (isActive) => {
+  if (isActive) {
+    downloads.refreshProgress()
+  }
+})
 
 // Stable sorted downloads list (newest first, tie-breaker by infoHash)
 const sortedDownloads = computed(() => {
