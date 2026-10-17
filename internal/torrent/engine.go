@@ -698,33 +698,60 @@ func (e *Engine) AddTorrentFile(filePath string) (string, error) {
 
 // OpenFileReader returns an io.ReadSeekCloser for audio streaming.
 // It prioritizes the first pieces (headers) and the last piece (metadata/duration).
+// It supports both active downloading torrents and pending preview torrents.
 func (e *Engine) OpenFileReader(infoHash, fileName string) (io.ReadSeekCloser, error) {
+	infoHashLower := strings.ToLower(infoHash)
+	infoHashUpper := strings.ToUpper(infoHash)
+
 	e.mu.RLock()
-	mt, ok := e.torrents[infoHash]
+	var t *torrent.Torrent
+	if mt, ok := e.torrents[infoHashLower]; ok && mt.T != nil {
+		t = mt.T
+	} else if mt, ok := e.torrents[infoHashUpper]; ok && mt.T != nil {
+		t = mt.T
+	} else if mt, ok := e.torrents[infoHash]; ok && mt.T != nil {
+		t = mt.T
+	} else if pt, ok := e.pendingTorrents[infoHashLower]; ok && pt != nil {
+		t = pt
+	} else if pt, ok := e.pendingTorrents[infoHashUpper]; ok && pt != nil {
+		t = pt
+	} else if pt, ok := e.pendingTorrents[infoHash]; ok && pt != nil {
+		t = pt
+	}
 	e.mu.RUnlock()
 
-	if !ok {
+	if t == nil {
 		return nil, fmt.Errorf("torrent %s not found", infoHash)
 	}
 
-	for _, f := range mt.T.Files() {
-		if filepath.Base(f.Path()) == fileName || f.Path() == fileName {
+	// Make sure data transfer is allowed for streaming preview
+	t.AllowDataDownload()
+	t.AddTrackers(defaultPublicTrackers)
+
+	normTarget := normalizeRelPath(fileName)
+	baseTarget := filepath.Base(normTarget)
+
+	for _, f := range t.Files() {
+		fNorm := normalizeRelPath(f.Path())
+		fBase := filepath.Base(fNorm)
+
+		if fNorm == normTarget || fBase == baseTarget || f.Path() == fileName || filepath.Base(f.Path()) == fileName {
 			f.SetPriority(torrent.PiecePriorityNormal)
 			f.Download()
 
 			begin := f.BeginPieceIndex()
 			end := f.EndPieceIndex()
 
-			for i := begin; i < end && i < begin+3; i++ {
-				mt.T.Piece(i).SetPriority(torrent.PiecePriorityNow)
+			for i := begin; i < end && i < begin+4; i++ {
+				t.Piece(i).SetPriority(torrent.PiecePriorityNow)
 			}
 			if end > begin {
-				mt.T.Piece(end - 1).SetPriority(torrent.PiecePriorityNow)
+				t.Piece(end - 1).SetPriority(torrent.PiecePriorityNow)
 			}
 
 			r := f.NewReader()
 			r.SetResponsive()
-			r.SetReadahead(3 * 1024 * 1024)
+			r.SetReadahead(4 * 1024 * 1024)
 			return r, nil
 		}
 	}

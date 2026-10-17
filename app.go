@@ -305,6 +305,11 @@ func (a *App) DownloadSelectedFiles(infoHash string, selectedPaths []string) err
 
 // CancelPendingTorrent drops a pending preview torrent without saving or downloading it.
 func (a *App) CancelPendingTorrent(infoHash string) {
+	st := a.player.Status()
+	if st.Track != nil && strings.EqualFold(st.Track.InfoHash, infoHash) && st.State == audio.StatePlaying {
+		// Don't kill audio stream if user is actively listening to preview
+		return
+	}
 	a.engine.CancelPendingTorrent(infoHash)
 }
 
@@ -423,6 +428,21 @@ func (a *App) PlayTrack(infoHash, filePath string) error {
 			}
 		}
 	}
+	if title == "" {
+		pArtist, pAlbum, pTitle, _ := parseSmartAudioInfo("", filePath, nil)
+		if pTitle != "" {
+			title = pTitle
+		} else {
+			title = strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+		}
+		if artist == "" && pArtist != "" {
+			artist = pArtist
+		}
+		if album == "" && pAlbum != "" {
+			album = pAlbum
+		}
+	}
+
 	if coverPath == "" {
 		coverPath = findCoverInDir(filepath.Dir(diskPath))
 	}
