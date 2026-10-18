@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/user/torrent-player/internal/audio"
 	"github.com/user/torrent-player/internal/hotkeys"
 	"github.com/user/torrent-player/internal/library"
@@ -150,12 +152,123 @@ func (a *App) waitForSources() {
 	}
 }
 
-// ─── Search ──────────────────────────────────────────────────────────────────
+// parseMagnetInfo inspects a query string to determine if it is a magnet link or infohash.
+func parseMagnetInfo(raw string) (infoHash, title, magnetURI string, isMagnet bool) {
+	trimmed := strings.TrimSpace(raw)
+	lower := strings.ToLower(trimmed)
+
+	if strings.HasPrefix(lower, "magnet:") {
+		isMagnet = true
+		magnetURI = trimmed
+
+		if m, err := metainfo.ParseMagnetURI(trimmed); err == nil {
+			infoHash = m.InfoHash.HexString()
+			title = m.DisplayName
+		}
+		if title == "" {
+			if u, err := url.Parse(trimmed); err == nil {
+				title = u.Query().Get("dn")
+			}
+		}
+		if title == "" {
+			re := regexp.MustCompile(`(?i)[?&]dn=([^&]+)`)
+			if matches := re.FindStringSubmatch(trimmed); len(matches) > 1 {
+				if unescaped, err := url.QueryUnescape(strings.ReplaceAll(matches[1], "+", " ")); err == nil {
+					title = unescaped
+				} else {
+					title = matches[1]
+				}
+			}
+		}
+		if title == "" {
+			if infoHash != "" {
+				prefix := infoHash
+				if len(prefix) > 8 {
+					prefix = prefix[:8]
+				}
+				title = "Magnet: " + prefix
+			} else {
+				title = "Magnet Torrent"
+			}
+		}
+		return infoHash, title, magnetURI, true
+	}
+
+	// Check if bare hex hash (40 characters)
+	if len(trimmed) == 40 {
+		isHex := true
+		for _, c := range trimmed {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+				isHex = false
+				break
+			}
+		}
+		if isHex {
+			hash := strings.ToLower(trimmed)
+			return hash, "Torrent " + hash[:8], "magnet:?xt=urn:btih:" + hash, true
+		}
+	}
+
+	// Check if bare base32 hash (32 characters)
+	if len(trimmed) == 32 {
+		isBase32 := true
+		for _, c := range strings.ToUpper(trimmed) {
+			if !((c >= 'A' && c <= 'Z') || (c >= '2' && c <= '7')) {
+				isBase32 = false
+				break
+			}
+		}
+		if isBase32 {
+			hash := strings.ToUpper(trimmed)
+			return hash, "Torrent " + hash[:8], "magnet:?xt=urn:btih:" + hash, true
+		}
+	}
+
+	return "", "", "", false
+}
 
 // Search queries all indexed JSON sources and torrent backends.
 func (a *App) Search(query string) []search.Result {
 	a.waitForSources()
 	var results []search.Result
+
+	trimmed := strings.TrimSpace(query)
+	infoHash, magnetTitle, magnetURI, isMagnet := parseMagnetInfo(trimmed)
+
+	if isMagnet {
+		// First check indexed sources for this magnet or hash
+		if a.sources != nil {
+			sourceRes := a.sources.Search(a.ctx, magnetURI, 20)
+			results = append(results, sourceRes...)
+		}
+
+		// Check if we already found an exact match in indexed sources
+		hasExact := false
+		for _, r := range results {
+			if strings.EqualFold(r.MagnetURI, magnetURI) || (infoHash != "" && strings.Contains(strings.ToLower(r.MagnetURI), strings.ToLower(infoHash))) {
+				hasExact = true
+				break
+			}
+		}
+
+		// If no exact item in sources, add the direct magnet result
+		if !hasExact {
+			results = append([]search.Result{{
+				Title:     magnetTitle,
+				MagnetURI: magnetURI,
+				Source:    "magnet",
+				Category:  "Music",
+				Seeders:   0,
+				Leechers:  0,
+				Size:      "—",
+				InfoHash:  infoHash,
+			}}, results...)
+		}
+
+		// Do not query web scrapers for magnet links as they do not support them
+		return results
+	}
+
 	if a.sources != nil {
 		results = append(results, a.sources.Search(a.ctx, query, 50)...)
 	}

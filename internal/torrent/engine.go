@@ -377,21 +377,35 @@ func (e *Engine) AddMagnetPending(magnetURI string) (string, []FileInfo, error) 
 
 	infoHash := spec.InfoHash.HexString()
 
-	// If already in active managed torrents, simply return its current file list!
+	// 1. If already in active managed torrents or pending, return current file list immediately!
 	e.mu.RLock()
 	existingMt, exists := e.torrents[infoHash]
+	pendingT, pendingExists := e.pendingTorrents[infoHash]
 	e.mu.RUnlock()
 	if exists && existingMt.T != nil && existingMt.T.Info() != nil {
 		return infoHash, e.buildFileList(existingMt.T, infoHash, false), nil
 	}
+	if pendingExists && pendingT != nil && pendingT.Info() != nil {
+		return infoHash, e.buildFileList(pendingT, infoHash, false), nil
+	}
 
-	spec.DisallowDataDownload = true
-	spec.DisallowDataUpload = true
-	injectPublicTrackers(spec)
+	// 2. Check if we have cached .torrent metadata on disk from previous session
+	metaPath := filepath.Join(e.cacheDir, infoHash+".torrent")
+	var t *torrent.Torrent
+	if _, statErr := os.Stat(metaPath); statErr == nil {
+		t, _ = e.client.AddTorrentFromFile(metaPath)
+	}
 
-	t, _, err := e.client.AddTorrentSpec(spec)
-	if err != nil {
-		return "", nil, fmt.Errorf("add magnet: %w", err)
+	if t == nil {
+		spec.DisallowDataDownload = true
+		spec.DisallowDataUpload = true
+		injectPublicTrackers(spec)
+
+		var addErr error
+		t, _, addErr = e.client.AddTorrentSpec(spec)
+		if addErr != nil {
+			return "", nil, fmt.Errorf("add magnet: %w", addErr)
+		}
 	}
 
 	t.AddTrackers(defaultPublicTrackers)
@@ -401,9 +415,13 @@ func (e *Engine) AddMagnetPending(magnetURI string) (string, []FileInfo, error) 
 	select {
 	case <-t.GotInfo():
 	case <-time.After(35 * time.Second):
-		t.Drop()
+		if !exists {
+			t.Drop()
+		}
 		return "", nil, fmt.Errorf("таймаут получения списка файлов (нет активных пиров для передачи метаданных)")
 	}
+
+	e.saveTorrentMetainfo(t)
 
 	t.CancelPieces(0, t.NumPieces())
 	for _, f := range t.Files() {
@@ -482,7 +500,9 @@ func (e *Engine) CancelPendingTorrent(infoHash string) {
 
 	if t, ok := e.pendingTorrents[infoHash]; ok {
 		delete(e.pendingTorrents, infoHash)
-		t.Drop()
+		if _, isManaged := e.torrents[infoHash]; !isManaged {
+			t.Drop()
+		}
 	}
 }
 
@@ -682,30 +702,72 @@ func (e *Engine) AddMagnet(magnetURI string) (string, error) {
 	}
 	injectPublicTrackers(spec)
 
-	t, _, err := e.client.AddTorrentSpec(spec)
-	if err != nil {
-		return "", fmt.Errorf("add magnet: %w", err)
+	infoHash := spec.InfoHash.HexString()
+
+	// Check if already exists in active torrents
+	e.mu.Lock()
+	if mt, ok := e.torrents[infoHash]; ok {
+		e.mu.Unlock()
+		mt.T.AllowDataDownload()
+		mt.T.AllowDataUpload()
+		mt.T.DownloadAll()
+		mt.State = StateDownloading
+		e.updateTorrentState(infoHash, StateDownloading)
+		return infoHash, nil
+	}
+	e.mu.Unlock()
+
+	// Check if cached .torrent exists
+	metaPath := filepath.Join(e.cacheDir, infoHash+".torrent")
+	var t *torrent.Torrent
+	if _, statErr := os.Stat(metaPath); statErr == nil {
+		t, _ = e.client.AddTorrentFromFile(metaPath)
+	}
+	if t == nil {
+		var addErr error
+		t, _, addErr = e.client.AddTorrentSpec(spec)
+		if addErr != nil {
+			return "", fmt.Errorf("add magnet: %w", addErr)
+		}
 	}
 	t.AddTrackers(defaultPublicTrackers)
+	t.AllowDataDownload()
+	t.AllowDataUpload()
 
-	<-t.GotInfo()
-	infoHash := t.InfoHash().HexString()
+	name := spec.DisplayName
+	if name == "" {
+		name = infoHash
+	}
 
-	e.mu.Lock()
-	e.torrents[infoHash] = &ManagedTorrent{
+	mt := &ManagedTorrent{
 		T:         t,
 		InfoHash:  infoHash,
-		Name:      t.Name(),
+		Name:      name,
 		MagnetURI: magnetURI,
 		State:     StateDownloading,
 		AddedAt:   time.Now(),
 	}
+
+	e.mu.Lock()
+	e.torrents[infoHash] = mt
 	e.mu.Unlock()
 
-	e.saveTorrentMetainfo(t)
-	e.saveTorrent(infoHash, t.Name(), magnetURI, nil, StateDownloading)
+	e.saveTorrent(infoHash, name, magnetURI, nil, StateDownloading)
 
-	t.DownloadAll()
+	go func() {
+		select {
+		case <-t.GotInfo():
+		case <-time.After(120 * time.Second):
+			return
+		}
+		e.saveTorrentMetainfo(t)
+		if mt.Name == "" || mt.Name == mt.InfoHash {
+			mt.Name = t.Name()
+			e.saveTorrent(mt.InfoHash, t.Name(), mt.MagnetURI, mt.SelectedPaths, mt.State)
+		}
+		t.DownloadAll()
+	}()
+
 	return infoHash, nil
 }
 

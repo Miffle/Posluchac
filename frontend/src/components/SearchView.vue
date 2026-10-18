@@ -157,8 +157,32 @@ async function syncSourcesHandler() {
   }
 }
 
+function extractMagnetTitle(uri: string): string {
+  try {
+    const url = new URL(uri)
+    const dn = url.searchParams.get('dn')
+    if (dn) return dn
+  } catch {
+    // fallback regex
+  }
+  const match = uri.match(/[?&]dn=([^&]+)/i)
+  if (match) {
+    try {
+      return decodeURIComponent(match[1].replace(/\+/g, ' '))
+    } catch {
+      return match[1]
+    }
+  }
+  const hashMatch = uri.match(/urn:btih:([a-zA-Z0-9]+)/i)
+  if (hashMatch) {
+    return 'Magnet: ' + hashMatch[1].slice(0, 8)
+  }
+  return t('search.magnetTorrent')
+}
+
 async function doSearch() {
-  if (!query.value.trim()) return
+  const trimmed = query.value.trim()
+  if (!trimmed) return
   if (sourcesList.value.length === 0) {
     loadSources(1)
   }
@@ -166,8 +190,16 @@ async function doSearch() {
   error.value = ''
   results.value = []
   try {
-    const res = await Search(query.value.trim())
+    const res = await Search(trimmed)
     results.value = (res || []) as SearchResult[]
+
+    // If query is a magnet link or hash and we got a result, open file picker immediately
+    const isMagnetOrHash = trimmed.toLowerCase().startsWith('magnet:') ||
+      ((trimmed.length === 40 || trimmed.length === 32) && !trimmed.includes(' '))
+
+    if (isMagnetOrHash && results.value.length > 0) {
+      await openFileSelector(results.value[0])
+    }
   } catch (e: any) {
     error.value = e?.message || t('common.error')
   } finally {
@@ -196,11 +228,35 @@ async function openFileSelector(result: SearchResult) {
     collapsedFolders.value = {}
   } catch (e: any) {
     showFileModal.value = false
-    await dialog.alert({
-      title: t('common.error'),
-      message: (e?.message || e),
-      type: 'error'
-    })
+    const errMsg = e?.message || String(e)
+
+    // If this was a magnet download and metadata retrieval timed out, offer background downloading
+    if (result.magnetUri) {
+      const ok = await dialog.confirm({
+        title: t('search.magnetTimeoutTitle'),
+        message: t('search.magnetTimeoutMsg'),
+        confirmText: t('search.addMagnetBtn'),
+        cancelText: t('search.cancelBtn')
+      })
+      if (ok) {
+        try {
+          await downloadsStore.addMagnet(result.magnetUri)
+          dialog.toast(t('search.toastAdded'), 'success')
+        } catch (addErr: any) {
+          await dialog.alert({
+            title: t('common.error'),
+            message: addErr?.message || String(addErr),
+            type: 'error'
+          })
+        }
+      }
+    } else {
+      await dialog.alert({
+        title: t('common.error'),
+        message: errMsg,
+        type: 'error'
+      })
+    }
   } finally {
     loadingFiles.value = false
   }
@@ -215,19 +271,28 @@ function closeFilePicker() {
 }
 
 async function addMagnetManual() {
-  if (!magnetUri.value.trim()) return
-  try {
-    await downloadsStore.addMagnet(magnetUri.value.trim())
-    magnetUri.value = ''
-    showMagnetInput.value = false
-    dialog.toast(t('search.toastAdded'), 'success')
-  } catch (e: any) {
-    await dialog.alert({
-      title: t('common.error'),
-      message: e?.message || String(e),
-      type: 'error'
-    })
+  const trimmed = magnetUri.value.trim()
+  if (!trimmed) return
+  magnetUri.value = ''
+  showMagnetInput.value = false
+
+  const title = extractMagnetTitle(trimmed)
+  const result: SearchResult = {
+    title,
+    magnetUri: trimmed,
+    source: 'magnet',
+    category: 'Music',
+    seeders: 0,
+    leechers: 0,
+    size: '—',
+    torrentUrl: ''
   }
+
+  // Prepend to results so user sees it in the list
+  results.value = [result, ...results.value]
+
+  // Open file picker so user can pick files or click download all
+  await openFileSelector(result)
 }
 
 // File modal helpers
@@ -521,12 +586,14 @@ function formatBytes(bytes: number) {
 function sourceLabel(source: string) {
   if (source === 'piratebay') return '☠️ PirateBay'
   if (source === '1337x') return '⚡ 1337x'
+  if (source === 'magnet') return '🔗 Magnet'
   return `📦 ${source}`
 }
 
 function sourceBadgeClass(source: string) {
   if (source === 'piratebay') return 'badge-pb'
   if (source === '1337x') return 'badge-x'
+  if (source === 'magnet') return 'badge-magnet'
   return 'badge-source'
 }
 </script>
@@ -865,6 +932,7 @@ function sourceBadgeClass(source: string) {
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; font-weight: 600; }
 .badge-pb { background: #3a1a1a; color: #f44336; }
 .badge-x  { background: #1a1a3a; color: #2196f3; }
+.badge-magnet { background: #3a2a1a; color: #ff9800; border: 1px solid rgba(255, 152, 0, 0.3); }
 .badge-source { background: #1a3a2a; color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.3); }
 
 .result-meta { display: flex; gap: 12px; font-size: 13px; color: var(--text2); white-space: nowrap; }

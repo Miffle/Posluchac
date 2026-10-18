@@ -233,36 +233,72 @@ func (m *Manager) ListSources() ([]Source, error) {
 	return result, nil
 }
 
-// Search queries all indexed source downloads matching the given terms.
+// Search queries all indexed source downloads matching the given terms or magnet URI/hash.
 func (m *Manager) Search(ctx context.Context, query string, limit int) []search.Result {
-	words := strings.Fields(strings.ToLower(query))
-	if len(words) == 0 {
+	if m.db == nil || limit <= 0 {
+		return nil
+	}
+	trimmed := strings.TrimSpace(query)
+	if trimmed == "" {
 		return nil
 	}
 
-	// Build WHERE clause: title_lower LIKE ? AND title_lower LIKE ?
-	var whereClauses []string
-	var args []any
-	for _, w := range words {
-		wClean := strings.ReplaceAll(w, "%", "")
-		wClean = strings.ReplaceAll(wClean, "_", "")
-		if wClean == "" {
-			continue
+	// Check if search query is a magnet link or infohash
+	lowerQuery := strings.ToLower(trimmed)
+	var hashToFind string
+	if strings.HasPrefix(lowerQuery, "magnet:") {
+		// Look for xt=urn:btih:
+		if idx := strings.Index(lowerQuery, "urn:btih:"); idx != -1 {
+			rem := lowerQuery[idx+len("urn:btih:"):]
+			if end := strings.IndexAny(rem, ";&"); end != -1 {
+				hashToFind = rem[:end]
+			} else {
+				hashToFind = rem
+			}
 		}
-		whereClauses = append(whereClauses, "sd.title_lower LIKE ?")
-		args = append(args, "%"+wClean+"%")
+	} else if (len(trimmed) == 40 || len(trimmed) == 32) && !strings.ContainsAny(trimmed, " \t\r\n") {
+		hashToFind = lowerQuery
 	}
-	if len(whereClauses) == 0 {
-		return nil
-	}
-	args = append(args, limit)
 
-	sqlQuery := fmt.Sprintf(`
-		SELECT sd.title, sd.magnet_uri, s.name
-		FROM source_downloads sd
-		JOIN sources s ON s.id = sd.source_id
-		WHERE %s
-		LIMIT ?`, strings.Join(whereClauses, " AND "))
+	var sqlQuery string
+	var args []any
+
+	if hashToFind != "" {
+		sqlQuery = `
+			SELECT sd.title, sd.magnet_uri, s.name
+			FROM source_downloads sd
+			JOIN sources s ON s.id = sd.source_id
+			WHERE sd.magnet_uri LIKE ?
+			LIMIT ?`
+		args = []any{"%" + hashToFind + "%", limit}
+	} else {
+		words := strings.Fields(lowerQuery)
+		if len(words) == 0 {
+			return nil
+		}
+
+		var whereClauses []string
+		for _, w := range words {
+			wClean := strings.ReplaceAll(w, "%", "")
+			wClean = strings.ReplaceAll(wClean, "_", "")
+			if wClean == "" {
+				continue
+			}
+			whereClauses = append(whereClauses, "(sd.title_lower LIKE ? OR sd.magnet_uri LIKE ?)")
+			args = append(args, "%"+wClean+"%", "%"+wClean+"%")
+		}
+		if len(whereClauses) == 0 {
+			return nil
+		}
+		args = append(args, limit)
+
+		sqlQuery = fmt.Sprintf(`
+			SELECT sd.title, sd.magnet_uri, s.name
+			FROM source_downloads sd
+			JOIN sources s ON s.id = sd.source_id
+			WHERE %s
+			LIMIT ?`, strings.Join(whereClauses, " AND "))
+	}
 
 	rows, err := m.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
