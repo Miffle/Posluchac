@@ -27,6 +27,12 @@ func main() {
 		Title:  "Posluchac",
 		Width:  1280,
 		Height: 820,
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: "posluchac-music-player-single-instance-lock",
+			OnSecondInstanceLaunch: func(secondInstanceData options.SecondInstanceData) {
+				app.showMainWindow()
+			},
+		},
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
