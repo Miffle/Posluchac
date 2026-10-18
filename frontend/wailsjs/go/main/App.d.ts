@@ -5,6 +5,7 @@ import {main} from '../models';
 import {sources} from '../models';
 import {updater} from '../models';
 import {library} from '../models';
+import {lyrics} from '../models';
 import {torrent} from '../models';
 import {audio} from '../models';
 
@@ -47,6 +48,8 @@ export function GetDownloadDir():Promise<string>;
 export function GetFavourites():Promise<Array<library.Track>>;
 
 export function GetLibrary():Promise<Array<library.Track>>;
+
+export function GetLyrics(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string):Promise<lyrics.Result>;
 
 export function GetPlaylistTracks(arg1:number):Promise<Array<library.Track>>;
 

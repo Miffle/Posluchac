@@ -49,6 +49,30 @@ export const usePlayerStore = defineStore('player', () => {
   const currentIndex = ref<number>(-1)
   const isCoverFullscreen = ref<boolean>(false)
 
+  // Shuffle queue & history for non-repeating shuffle cycle with backward navigation
+  const unplayedIndices = ref<number[]>([])
+  const shuffleHistory = ref<number[]>([])
+
+  function initShufflePool(excludeIndex: number = -1) {
+    const total = playlist.value.length
+    if (total <= 1) {
+      unplayedIndices.value = []
+      return
+    }
+    const pool: number[] = []
+    for (let i = 0; i < total; i++) {
+      if (i !== excludeIndex) {
+        pool.push(i)
+      }
+    }
+    // Fisher-Yates shuffle
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]]
+    }
+    unplayedIndices.value = pool
+  }
+
   function openCoverFullscreen() {
     isCoverFullscreen.value = true
   }
@@ -110,6 +134,10 @@ export const usePlayerStore = defineStore('player', () => {
     if (queue && queue.length > 0) {
       playlist.value = queue
       currentIndex.value = queue.findIndex(t => t.filePath === filePath)
+      shuffleHistory.value = []
+      if (isShuffled.value) {
+        initShufflePool(currentIndex.value)
+      }
     } else {
       const idx = playlist.value.findIndex(t => t.filePath === filePath)
       if (idx !== -1) {
@@ -117,6 +145,10 @@ export const usePlayerStore = defineStore('player', () => {
       } else {
         playlist.value.push({ infoHash, filePath, fileName: filePath })
         currentIndex.value = playlist.value.length - 1
+      }
+      shuffleHistory.value = []
+      if (isShuffled.value) {
+        initShufflePool(currentIndex.value)
       }
     }
     await PlayTrack(infoHash, filePath)
@@ -133,9 +165,24 @@ export const usePlayerStore = defineStore('player', () => {
 
     let nextIdx: number
     if (isShuffled.value) {
-      do {
-        nextIdx = Math.floor(Math.random() * playlist.value.length)
-      } while (nextIdx === currentIndex.value)
+      // Save current track to history so user can go back via playPrev
+      if (currentIndex.value >= 0 && currentIndex.value < playlist.value.length) {
+        shuffleHistory.value.push(currentIndex.value)
+      }
+
+      // Filter unplayed pool to valid bounds
+      unplayedIndices.value = unplayedIndices.value.filter(i => i >= 0 && i < playlist.value.length && i !== currentIndex.value)
+
+      // When pool is exhausted, re-fill with all tracks except current (start new non-repeating cycle)
+      if (unplayedIndices.value.length === 0) {
+        initShufflePool(currentIndex.value)
+      }
+
+      if (unplayedIndices.value.length > 0) {
+        nextIdx = unplayedIndices.value.shift()!
+      } else {
+        nextIdx = (currentIndex.value + 1) % playlist.value.length
+      }
     } else {
       nextIdx = (currentIndex.value + 1) % playlist.value.length
     }
@@ -156,9 +203,16 @@ export const usePlayerStore = defineStore('player', () => {
 
     let prevIdx: number
     if (isShuffled.value) {
-      do {
-        prevIdx = Math.floor(Math.random() * playlist.value.length)
-      } while (prevIdx === currentIndex.value)
+      if (shuffleHistory.value.length > 0) {
+        prevIdx = shuffleHistory.value.pop()!
+        // Return current track back to pool so next forward navigation doesn't skip it
+        if (currentIndex.value >= 0 && currentIndex.value < playlist.value.length) {
+          unplayedIndices.value.unshift(currentIndex.value)
+        }
+      } else {
+        // No prior tracks in history: step back in playlist order
+        prevIdx = (currentIndex.value - 1 + playlist.value.length) % playlist.value.length
+      }
     } else {
       prevIdx = (currentIndex.value - 1 + playlist.value.length) % playlist.value.length
     }
@@ -200,6 +254,12 @@ export const usePlayerStore = defineStore('player', () => {
 
   function toggleShuffle() {
     isShuffled.value = !isShuffled.value
+    shuffleHistory.value = []
+    if (isShuffled.value) {
+      initShufflePool(currentIndex.value)
+    } else {
+      unplayedIndices.value = []
+    }
     try {
       localStorage.setItem('torrent_player_shuffle', isShuffled.value.toString())
     } catch { /* ignore */ }

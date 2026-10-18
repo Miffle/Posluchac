@@ -214,6 +214,14 @@ function toggleMute() {
       </div>
 
       <button
+        class="fs-toggle-btn lyrics-btn"
+        @click="player.openCoverFullscreen()"
+        :title="t('player.lyrics')"
+      >
+        <span>🎤</span>
+      </button>
+
+      <button
         class="fs-toggle-btn"
         @click="player.openCoverFullscreen()"
         :title="t('player.expandCover')"

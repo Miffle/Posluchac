@@ -21,6 +21,7 @@ import (
 	"github.com/user/torrent-player/internal/audio"
 	"github.com/user/torrent-player/internal/hotkeys"
 	"github.com/user/torrent-player/internal/library"
+	"github.com/user/torrent-player/internal/lyrics"
 	"github.com/user/torrent-player/internal/metadata"
 	"github.com/user/torrent-player/internal/search"
 	"github.com/user/torrent-player/internal/sources"
@@ -39,6 +40,7 @@ type App struct {
 	scraper      *sources.Scraper
 	searcher     *search.MultiSearcher
 	rutracker    *search.RutrackerSearcher
+	lyrics       *lyrics.Client
 	hotkeys      *hotkeys.Manager
 	dataDir      string
 	downloadDir  string
@@ -67,6 +69,7 @@ func NewApp() *App {
 	return &App{
 		dataDir:      dataDir,
 		downloadDir:  dlDir,
+		lyrics:       lyrics.NewClient(),
 		readySources: make(chan struct{}),
 	}
 }
@@ -1189,4 +1192,16 @@ func (a *App) ApplyUpdate(downloadURL string) error {
 // OpenExternalURL opens a URL in the user's default browser.
 func (a *App) OpenExternalURL(url string) error {
 	return updater.OpenURL(url)
+}
+
+// ─── Lyrics (LRC) ────────────────────────────────────────────────────────────
+
+// GetLyrics searches for synchronized or plain lyrics from local files or LRCLIB.
+func (a *App) GetLyrics(artist, title, album string, durationSec float64, filePath string) (*lyrics.Result, error) {
+	if a.lyrics == nil {
+		a.lyrics = lyrics.NewClient()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	return a.lyrics.GetLyrics(ctx, artist, title, album, durationSec, filePath)
 }

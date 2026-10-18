@@ -164,6 +164,39 @@ export namespace library {
 
 }
 
+export namespace lyrics {
+	
+	export class Result {
+	    found: boolean;
+	    artist: string;
+	    title: string;
+	    album: string;
+	    duration: number;
+	    instrumental: boolean;
+	    plainLyrics: string;
+	    syncedLyrics: string;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Result(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.found = source["found"];
+	        this.artist = source["artist"];
+	        this.title = source["title"];
+	        this.album = source["album"];
+	        this.duration = source["duration"];
+	        this.instrumental = source["instrumental"];
+	        this.plainLyrics = source["plainLyrics"];
+	        this.syncedLyrics = source["syncedLyrics"];
+	        this.source = source["source"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class PendingTorrent {
