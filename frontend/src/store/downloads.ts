@@ -24,6 +24,8 @@ export interface DownloadProgress {
   downloadSpeed: number
   uploadSpeed: number
   seeders: number
+  peers?: number
+  leechers?: number
   state: string
   addedAt?: number
   selectedCount?: number

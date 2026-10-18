@@ -193,9 +193,26 @@ async function onDeleteTorrent(d: any) {
           <span :style="{ color: stateColor(d.state) }" class="state-badge">{{ stateLabel(d.state) }}</span>
           <span v-if="d.state === 'metadata'" class="meta-hint">{{ t('downloads.metadataHint') }}</span>
           <span v-else>{{ formatBytes(d.downloaded) }} / {{ formatBytes(d.total) }}</span>
-          <span v-if="d.seeders > 0 || d.state !== 'metadata'">🌱 {{ d.seeders }} {{ t('downloads.seedersCount') }}</span>
+
+          <span
+            v-if="d.state !== 'metadata'"
+            class="swarm-meta"
+            :title="d.state === 'seeding' && (d.leechers ?? 0) === 0 ? t('downloads.seedingIdleTooltip') : undefined"
+          >
+            🌱 {{ d.seeders }} {{ t('downloads.seedersCount') }}
+            <span class="meta-sep">·</span>
+            👥 {{ d.leechers ?? 0 }} {{ t('downloads.leechersCount') }}
+          </span>
+
           <span v-if="d.downloadSpeed > 0" class="speed-dl">⬇ {{ formatBytes(d.downloadSpeed) }}/s</span>
-          <span v-if="d.uploadSpeed > 0 || d.state === 'seeding'" class="speed-ul">⬆ {{ formatBytes(d.uploadSpeed) }}/s</span>
+          <span
+            v-if="d.uploadSpeed > 0 || d.state === 'seeding'"
+            class="speed-ul"
+            :class="{ 'speed-idle': d.uploadSpeed === 0 && d.state === 'seeding' }"
+            :title="d.state === 'seeding' && d.uploadSpeed === 0 ? t('downloads.seedingIdleTooltip') : undefined"
+          >
+            ⬆ {{ formatBytes(d.uploadSpeed) }}/s<span v-if="d.state === 'seeding' && d.uploadSpeed === 0" class="idle-tag"> ({{ t('downloads.idle') }})</span>
+          </span>
         </div>
 
         <!-- File list (expanded) with individual download/delete actions -->
@@ -310,6 +327,10 @@ async function onDeleteTorrent(d: any) {
 .state-badge { font-weight: 600; }
 .speed-dl { color: #2196f3; font-weight: 500; font-variant-numeric: tabular-nums; }
 .speed-ul { color: #4caf50; font-weight: 500; font-variant-numeric: tabular-nums; }
+.speed-ul.speed-idle { color: var(--text2); opacity: 0.8; }
+.idle-tag { font-size: 11px; opacity: 0.75; margin-left: 2px; }
+.swarm-meta { display: inline-flex; align-items: center; gap: 5px; }
+.meta-sep { opacity: 0.4; margin: 0 1px; }
 
 /* File list */
 .file-list { border-top: 1px solid var(--border); padding-top: 10px; display: flex; flex-direction: column; gap: 6px; }

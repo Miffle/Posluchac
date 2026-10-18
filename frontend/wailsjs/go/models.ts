@@ -291,6 +291,8 @@ export namespace torrent {
 	    downloadSpeed: number;
 	    uploadSpeed: number;
 	    seeders: number;
+	    peers: number;
+	    leechers: number;
 	    state: string;
 	    addedAt: number;
 	    selectedCount: number;
@@ -310,6 +312,8 @@ export namespace torrent {
 	        this.downloadSpeed = source["downloadSpeed"];
 	        this.uploadSpeed = source["uploadSpeed"];
 	        this.seeders = source["seeders"];
+	        this.peers = source["peers"];
+	        this.leechers = source["leechers"];
 	        this.state = source["state"];
 	        this.addedAt = source["addedAt"];
 	        this.selectedCount = source["selectedCount"];

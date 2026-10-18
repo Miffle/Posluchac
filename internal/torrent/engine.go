@@ -56,6 +56,8 @@ type DownloadProgress struct {
 	DownloadSpeed float64 `json:"downloadSpeed"`
 	UploadSpeed   float64 `json:"uploadSpeed"`
 	Seeders       int     `json:"seeders"`
+	Peers         int     `json:"peers"`
+	Leechers      int     `json:"leechers"`
 	State         string  `json:"state"`
 	AddedAt       int64   `json:"addedAt"`
 	SelectedCount int     `json:"selectedCount"`
@@ -125,7 +127,12 @@ func NewEngine(cacheDir, exportDir string, db *sql.DB) (*Engine, error) {
 
 	client, err := torrent.NewClient(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("create torrent client: %w", err)
+		// Fallback to dynamic port if default port is in use
+		cfg.ListenPort = 0
+		client, err = torrent.NewClient(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("create torrent client: %w", err)
+		}
 	}
 
 	e := &Engine{
@@ -216,6 +223,33 @@ func (e *Engine) saveTorrentMetainfo(t *torrent.Torrent) {
 	}
 	defer f.Close()
 	_ = mi.Write(f)
+}
+
+// syncExportToCache ensures that any completed files that exist in exportDir are also present in cacheDir,
+// using hard links (or copies) so anacrolix/torrent can verify and seed existing pieces.
+func (e *Engine) syncExportToCache(t *torrent.Torrent) {
+	if t == nil || t.Info() == nil {
+		return
+	}
+	for _, f := range t.Files() {
+		fLen := f.Length()
+		if fLen <= 0 {
+			continue
+		}
+		dstInCache := filepath.Join(e.cacheDir, f.Path())
+		srcInExport := filepath.Join(e.exportDir, f.Path())
+
+		cacheFi, cacheErr := os.Stat(dstInCache)
+		exportFi, exportErr := os.Stat(srcInExport)
+
+		if (os.IsNotExist(cacheErr) || (cacheErr == nil && cacheFi.Size() < fLen)) &&
+			(exportErr == nil && exportFi.Size() >= fLen) {
+			_ = os.MkdirAll(filepath.Dir(dstInCache), 0o755)
+			if err := os.Link(srcInExport, dstInCache); err != nil {
+				_ = copyFile(srcInExport, dstInCache)
+			}
+		}
+	}
 }
 
 func (e *Engine) restoreTorrents() {
@@ -315,6 +349,11 @@ func (e *Engine) restoreTorrents() {
 				t.CancelPieces(0, t.NumPieces())
 				return
 			}
+
+			// Ensure existing files are verified so pieces are marked complete for seeding
+			e.syncExportToCache(t)
+			t.VerifyData()
+			t.AllowDataUpload()
 
 			_ = e.DownloadSelectedFiles(mt.InfoHash, mt.SelectedPaths)
 		}(t, mt, item.state)
@@ -506,6 +545,10 @@ func (e *Engine) DownloadSelectedFiles(infoHash string, selectedPaths []string) 
 	mt.T.AllowDataDownload()
 	mt.T.AllowDataUpload()
 	mt.T.AddTrackers(defaultPublicTrackers)
+
+	// Sync any already downloaded files from export to cache and verify pieces
+	e.syncExportToCache(mt.T)
+	mt.T.VerifyData()
 
 	isDownloadAll := len(selectedPaths) == 0 && len(mt.SelectedPaths) == 0
 	mt.DownloadAll = isDownloadAll
@@ -800,6 +843,8 @@ func (e *Engine) GetProgress() []DownloadProgress {
 				PercentDone:   0,
 				State:         "metadata",
 				Seeders:       0,
+				Peers:         0,
+				Leechers:      0,
 				AddedAt:       addedAt,
 				SelectedCount: selectedCount,
 				SelectedTrack: selectedTrack,
@@ -946,9 +991,17 @@ func (e *Engine) GetProgress() []DownloadProgress {
 			state = string(StateSeeding)
 			mt.State = StateSeeding
 			pct = 100.0
+			mt.T.AllowDataUpload()
 		} else {
 			state = string(StateDownloading)
 			mt.State = StateDownloading
+		}
+
+		connectedSeeders := stats.ConnectedSeeders
+		activePeers := stats.ActivePeers
+		leechers := activePeers - connectedSeeders
+		if leechers < 0 {
+			leechers = 0
 		}
 
 		result = append(result, DownloadProgress{
@@ -959,7 +1012,9 @@ func (e *Engine) GetProgress() []DownloadProgress {
 			PercentDone:   pct,
 			DownloadSpeed: mt.downloadSpeed,
 			UploadSpeed:   mt.uploadSpeed,
-			Seeders:       stats.ConnectedSeeders,
+			Seeders:       connectedSeeders,
+			Peers:         activePeers,
+			Leechers:      leechers,
 			State:         state,
 			AddedAt:       addedAt,
 			SelectedCount: selectedCount,
