@@ -6,6 +6,8 @@ import LibraryView from './components/LibraryView.vue'
 import PlayerBar from './components/PlayerBar.vue'
 import DownloadsView from './components/DownloadsView.vue'
 import PlaylistView from './components/PlaylistView.vue'
+import SettingsView from './components/SettingsView.vue'
+import FullscreenCover from './components/FullscreenCover.vue'
 import UpdateModal from './components/UpdateModal.vue'
 import GlobalModal from './components/GlobalModal.vue'
 import ToastContainer from './components/ToastContainer.vue'
@@ -16,7 +18,7 @@ import { setupMediaIntegration } from './utils/mediaSession'
 
 import { provide } from 'vue'
 
-type View = 'search' | 'library' | 'downloads' | 'playlists'
+type View = 'search' | 'library' | 'downloads' | 'playlists' | 'settings'
 const currentView = ref<View>('library')
 
 function navigate(view: View) {
@@ -46,9 +48,11 @@ onMounted(() => {
       <LibraryView  v-show="currentView === 'library'"   :active="currentView === 'library'" />
       <DownloadsView v-show="currentView === 'downloads'" :active="currentView === 'downloads'" />
       <PlaylistView v-show="currentView === 'playlists'" />
+      <SettingsView v-show="currentView === 'settings'" />
     </main>
 
     <PlayerBar />
+    <FullscreenCover />
     <UpdateModal />
     <GlobalModal />
     <ToastContainer />

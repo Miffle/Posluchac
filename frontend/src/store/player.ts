@@ -47,6 +47,19 @@ export const usePlayerStore = defineStore('player', () => {
   const repeatMode = ref<RepeatMode>('off')
   const playlist = ref<QueueTrack[]>([])
   const currentIndex = ref<number>(-1)
+  const isCoverFullscreen = ref<boolean>(false)
+
+  function openCoverFullscreen() {
+    isCoverFullscreen.value = true
+  }
+
+  function closeCoverFullscreen() {
+    isCoverFullscreen.value = false
+  }
+
+  function toggleCoverFullscreen() {
+    isCoverFullscreen.value = !isCoverFullscreen.value
+  }
 
   let pollInterval: ReturnType<typeof setInterval> | null = null
   let lastState = 'stopped'
@@ -210,6 +223,10 @@ export const usePlayerStore = defineStore('player', () => {
     isShuffled,
     playlist,
     currentIndex,
+    isCoverFullscreen,
+    openCoverFullscreen,
+    closeCoverFullscreen,
+    toggleCoverFullscreen,
     startPolling,
     stopPolling,
     play,

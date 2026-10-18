@@ -1,8 +1,10 @@
 <script lang="ts" setup>
 import { usePlayerStore } from '../store/player'
+import { useI18n } from '../i18n'
 import { computed } from 'vue'
 
 const player = usePlayerStore()
+const { t } = useI18n()
 const s = computed(() => player.status)
 
 function formatTime(sec: number): string {
@@ -31,9 +33,9 @@ function onSeekClick(e: MouseEvent) {
 }
 
 const repeatTooltip = computed(() => {
-  if (player.repeatMode === 'one') return 'Повтор одной песни (нажмите для выключения)'
-  if (player.repeatMode === 'all') return 'Повтор плейлиста (нажмите для повтора одной песни)'
-  return 'Повтор выключен (нажмите для повтора плейлиста)'
+  if (player.repeatMode === 'one') return t('player.repeatOne')
+  if (player.repeatMode === 'all') return t('player.repeatAll')
+  return t('player.repeatOff')
 })
 
 const volumeIcon = computed(() => {
@@ -87,7 +89,13 @@ function toggleMute() {
   <footer class="player-bar">
     <!-- Track info -->
     <div class="track-info">
-      <div class="track-cover-box">
+      <div
+        class="track-cover-box"
+        @click="player.openCoverFullscreen()"
+        :title="t('player.expandCover')"
+        role="button"
+        tabindex="0"
+      >
         <img
           v-if="s.track?.coverPath"
           :src="'/api/cover?path=' + encodeURIComponent(s.track.coverPath)"
@@ -96,14 +104,18 @@ function toggleMute() {
           @error="($event.target as HTMLElement).style.display = 'none'"
         />
         <div v-else class="track-icon">🎵</div>
+
+        <div class="track-cover-overlay">
+          <span class="cover-expand-icon">⛶</span>
+        </div>
       </div>
       <div class="track-meta">
         <div class="track-name" :title="displayTitle">{{ displayTitle }}</div>
         <div class="track-artist" v-if="displayArtist" :title="displayArtist">{{ displayArtist }}</div>
         <div class="track-sub" v-else>
-          <span v-if="s.state === 'playing'" class="state-indicator playing">▶ Играет</span>
-          <span v-else-if="s.state === 'paused'" class="state-indicator paused">⏸ Пауза</span>
-          <span v-else class="state-indicator stopped">Остановлен</span>
+          <span v-if="s.state === 'playing'" class="state-indicator playing">▶ {{ t('common.play') }}</span>
+          <span v-else-if="s.state === 'paused'" class="state-indicator paused">⏸ {{ t('common.pause') }}</span>
+          <span v-else class="state-indicator stopped">{{ t('player.noTrack') }}</span>
         </div>
       </div>
     </div>
@@ -116,7 +128,7 @@ function toggleMute() {
           class="ctrl-btn shuffle-btn"
           :class="{ active: player.isShuffled }"
           @click="player.toggleShuffle()"
-          :title="player.isShuffled ? 'Перемешивание: включено (нажмите для выключения)' : 'Перемешивание: выключено (нажмите для включения)'"
+          :title="player.isShuffled ? t('player.shuffleOn') : t('player.shuffleOff')"
         >
           🔀
         </button>
@@ -135,7 +147,7 @@ function toggleMute() {
           class="ctrl-btn play-btn"
           @click="player.togglePause()"
           :disabled="s.state === 'stopped'"
-          :title="s.state === 'playing' ? 'Пауза' : 'Воспроизведение'"
+          :title="s.state === 'playing' ? t('common.pause') : t('common.play')"
         >
           <svg v-if="s.state === 'playing'" viewBox="0 0 24 24" class="play-svg">
             <path fill="currentColor" d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
@@ -181,22 +193,32 @@ function toggleMute() {
       </div>
     </div>
 
-    <!-- Volume -->
-    <div class="volume-wrap">
-      <span class="volume-icon" @click="toggleMute" title="Выключить / включить звук">{{ volumeIcon }}</span>
-      <input
-        type="range"
-        min="0"
-        max="1"
-        step="0.01"
-        :value="s.volume"
-        @input="player.setVolume(+($event.target as HTMLInputElement).value)"
-        class="volume-slider"
-        :style="{
-          background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${volumePercent}%, var(--surface2) ${volumePercent}%, var(--surface2) 100%)`
-        }"
-        title="Громкость"
-      />
+    <!-- Volume & Fullscreen Button -->
+    <div class="right-actions-wrap">
+      <div class="volume-wrap">
+        <span class="volume-icon" @click="toggleMute" :title="s.volume === 0 ? t('player.unmute') : t('player.mute')">{{ volumeIcon }}</span>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          :value="s.volume"
+          @input="player.setVolume(+($event.target as HTMLInputElement).value)"
+          class="volume-slider"
+          :style="{
+            background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${volumePercent}%, var(--surface2) ${volumePercent}%, var(--surface2) 100%)`
+          }"
+          title="Громкость"
+        />
+      </div>
+
+      <button
+        class="fs-toggle-btn"
+        @click="player.openCoverFullscreen()"
+        :title="t('player.expandCover')"
+      >
+        <span>⛶</span>
+      </button>
     </div>
   </footer>
 </template>
@@ -227,6 +249,35 @@ function toggleMute() {
   justify-content: center;
   background: var(--surface);
   flex-shrink: 0;
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.track-cover-box:hover {
+  transform: scale(1.05);
+}
+.track-cover-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  border-radius: 6px;
+}
+.track-cover-box:hover .track-cover-overlay {
+  opacity: 1;
+}
+.cover-expand-icon {
+  color: #fff;
+  font-size: 16px;
+  transform: scale(0.9);
+  transition: transform 0.15s ease;
+}
+.track-cover-box:hover .cover-expand-icon {
+  transform: scale(1.1);
 }
 .track-cover-img {
   width: 100%;
@@ -381,7 +432,33 @@ function toggleMute() {
   transform: translateY(-50%) scale(1);
 }
 
-/* Volume */
+/* Volume & Actions */
+.right-actions-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+}
+.fs-toggle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text2);
+  font-size: 19px;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  opacity: 0.8;
+}
+.fs-toggle-btn:hover {
+  color: var(--accent);
+  background: var(--surface);
+  opacity: 1;
+  transform: scale(1.1);
+}
 .volume-wrap { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
 .volume-icon { font-size: 18px; user-select: none; cursor: pointer; transition: transform 0.1s; }
 .volume-icon:hover { transform: scale(1.1); }

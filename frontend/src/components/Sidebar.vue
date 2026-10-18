@@ -1,19 +1,23 @@
 <script lang="ts" setup>
+import { computed } from 'vue'
 import { useUpdaterStore } from '../store/updater'
+import { useI18n } from '../i18n'
 
-type View = 'search' | 'library' | 'downloads' | 'playlists'
+export type View = 'search' | 'library' | 'downloads' | 'playlists' | 'settings'
 
 defineProps<{ currentView: View }>()
 const emit = defineEmits<{ navigate: [view: View] }>()
 
 const updater = useUpdaterStore()
+const { t } = useI18n()
 
-const items: { id: View; label: string; icon: string }[] = [
-  { id: 'search',    label: 'Поиск',      icon: '🔍' },
-  { id: 'library',   label: 'Библиотека', icon: '🎵' },
-  { id: 'downloads', label: 'Загрузки',   icon: '⬇️' },
-  { id: 'playlists', label: 'Плейлисты',  icon: '📋' },
-]
+const items = computed<{ id: View; label: string; icon: string }[]>(() => [
+  { id: 'search',    label: t('nav.search'),    icon: '🔍' },
+  { id: 'library',   label: t('nav.library'),   icon: '🎵' },
+  { id: 'downloads', label: t('nav.downloads'), icon: '⬇️' },
+  { id: 'playlists', label: t('nav.playlists'), icon: '📋' },
+  { id: 'settings',  label: t('nav.settings'),  icon: '⚙️' },
+])
 </script>
 
 <template>

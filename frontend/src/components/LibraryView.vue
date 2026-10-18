@@ -11,7 +11,10 @@ import {
 import { usePlayerStore } from '../store/player'
 import { usePlaylistsStore } from '../store/playlists'
 import { useDialogStore } from '../store/dialog'
+import { useI18n } from '../i18n'
 import AddToPlaylistModal from './AddToPlaylistModal.vue'
+
+const { t } = useI18n()
 
 interface Track {
   id: number
@@ -313,25 +316,25 @@ watch(filteredArtists, (newArtists) => {
   <div class="library-view">
     <div class="view-header">
       <div class="header-left">
-        <h1>Библиотека</h1>
+        <h1>{{ t('library.title') }}</h1>
         <div class="tabs">
-          <button :class="['tab', { active: tab === 'all' }]" @click="setTab('all')">Все треки</button>
-          <button :class="['tab', { active: tab === 'artists' }]" @click="setTab('artists')">По исполнителям</button>
-          <button :class="['tab', { active: tab === 'favourites' }]" @click="setTab('favourites')">❤️ Избранное</button>
+          <button :class="['tab', { active: tab === 'all' }]" @click="setTab('all')">{{ t('library.allTracks') }}</button>
+          <button :class="['tab', { active: tab === 'artists' }]" @click="setTab('artists')">{{ t('library.artists') }}</button>
+          <button :class="['tab', { active: tab === 'favourites' }]" @click="setTab('favourites')">❤️ {{ t('library.favourites') }}</button>
         </div>
       </div>
       <div class="header-right">
         <div class="toast-pill" v-if="playlistsStore.toastMessage">
           {{ playlistsStore.toastMessage }}
         </div>
-        <button class="btn btn-ghost btn-sm scan-btn" @click="refreshLibrary" title="Просканировать папку музыки на новые файлы">
-          🔄 Обновить папку
+        <button class="btn btn-ghost btn-sm scan-btn" @click="refreshLibrary" :title="t('library.rescan')">
+          🔄 {{ t('library.rescan') }}
         </button>
       </div>
     </div>
 
     <div class="search-row">
-      <input v-model="query" type="text" placeholder="Поиск в библиотеке (исполнитель, альбом, трек)..." @input="loadTracks" />
+      <input v-model="query" type="text" :placeholder="t('library.searchPlaceholder')" @input="loadTracks" />
     </div>
 
     <!-- Empty State -->
