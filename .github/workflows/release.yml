@@ -97,6 +97,11 @@ jobs:
             echo "should_release=true" >> $env:GITHUB_OUTPUT
           }
 
+      - name: Verify Version Synchronization
+        if: steps.version_check.outputs.should_release == 'true'
+        shell: pwsh
+        run: ./scripts/check-versions.ps1
+
       - name: Install Frontend Dependencies
         if: steps.version_check.outputs.should_release == 'true'
         working-directory: ./frontend
@@ -160,6 +165,7 @@ jobs:
           $features  = @()
           $fixes     = @()
           $perf      = @()
+          $docs      = @()
           $other     = @()
 
           foreach ($line in $commits) {
@@ -171,6 +177,8 @@ jobs:
               $fixes += "- " + ($line -replace '^fix(\(.+\))?[!:]?\s*', '')
             } elseif ($line -match '^perf(\(.+\))?[!:]?\s*') {
               $perf += "- " + ($line -replace '^perf(\(.+\))?[!:]?\s*', '')
+            } elseif ($line -match '^docs(\(.+\))?[!:]?\s*') {
+              $docs += "- " + ($line -replace '^docs(\(.+\))?[!:]?\s*', '')
             } else {
               $other += "- $line"
             }
@@ -189,6 +197,9 @@ jobs:
           }
           if ($perf.Count -gt 0) {
             $body += "### ⚡ Performance Improvements$nl" + ($perf -join $nl) + "$nl$nl"
+          }
+          if ($docs.Count -gt 0) {
+            $body += "### 📝 Documentation$nl" + ($docs -join $nl) + "$nl$nl"
           }
           if ($other.Count -gt 0) {
             $body += "### 🔧 Other Changes$nl" + ($other -join $nl) + "$nl$nl"
