@@ -54,6 +54,42 @@ const loading = ref(false)
 const error = ref('')
 const pendingScrapes = ref<Set<string>>(new Set())
 
+// Format & Bitrate Filtering
+export type FormatFilter = 'all' | 'lossless' | 'mp3_320'
+const activeFilter = ref<FormatFilter>('all')
+
+function detectReleaseFormat(title: string): 'lossless' | 'mp3_320' | null {
+  const t = title.toLowerCase()
+  const losslessKw = ['flac', 'lossless', 'ape', 'alac', 'wav', '24bit', '24-bit', 'hi-res', 'hires', 'dsd', 'sacd']
+  for (const kw of losslessKw) {
+    if (t.includes(kw)) return 'lossless'
+  }
+  if (t.includes('320')) return 'mp3_320'
+  return null
+}
+
+function matchesActiveFilter(r: SearchResult): boolean {
+  if (activeFilter.value === 'all') return true
+  const fmt = detectReleaseFormat(r.title)
+  return fmt === activeFilter.value
+}
+
+const filteredResults = computed(() => {
+  return results.value.filter(matchesActiveFilter)
+})
+
+function setFilter(filter: FormatFilter) {
+  if (activeFilter.value === filter && filter !== 'all') {
+    activeFilter.value = 'all'
+  } else {
+    activeFilter.value = filter
+  }
+  // If user clicks a filter pill and we have a query with 0 visible results, re-fetch
+  if (query.value.trim() && results.value.length > 0 && filteredResults.value.length === 0) {
+    doSearch()
+  }
+}
+
 // Sources Manager (Hydra Launcher style)
 const showSourcesModal = ref(false)
 const sourcesList = ref<Source[]>([])
@@ -188,12 +224,22 @@ async function doSearch() {
   if (sourcesList.value.length === 0) {
     loadSources(1)
   }
+
+  // Detect any inline format directives in query
+  const lower = trimmed.toLowerCase()
+  if (lower.includes('format:flac') || lower.includes('format:lossless')) {
+    activeFilter.value = 'lossless'
+  } else if (lower.includes('format:320') || lower.includes('format:mp3')) {
+    activeFilter.value = 'mp3_320'
+  }
+
   loading.value = true
   error.value = ''
   results.value = []
   pendingScrapes.value.clear()
   try {
-    const res = await Search(trimmed)
+    const filterArg = activeFilter.value === 'all' ? '' : activeFilter.value
+    const res = await Search(trimmed, filterArg)
     results.value = (res || []) as SearchResult[]
 
     // Kick off async seeder scrape for source results (those with seeders=0)
@@ -702,14 +748,54 @@ function sourceBadgeClass(source: string) {
       </button>
     </div>
 
+    <!-- Quick Format & Bitrate Filter Badges -->
+    <div class="filter-badges-bar">
+      <button
+        class="filter-pill"
+        :class="{ active: activeFilter === 'all' }"
+        @click="setFilter('all')"
+      >
+        ✨ {{ t('search.filterAll') }}
+      </button>
+      <button
+        class="filter-pill pill-lossless"
+        :class="{ active: activeFilter === 'lossless' }"
+        @click="setFilter('lossless')"
+      >
+        💎 {{ t('search.filterLossless') }}
+      </button>
+      <button
+        class="filter-pill pill-mp3"
+        :class="{ active: activeFilter === 'mp3_320' }"
+        @click="setFilter('mp3_320')"
+      >
+        ⚡ {{ t('search.filterMp3320') }}
+      </button>
+    </div>
+
     <p class="error-msg" v-if="error">{{ error }}</p>
 
     <!-- Results -->
-    <div class="results" v-if="results.length">
-      <div class="results-count">{{ t('search.resultsCount') }}: {{ results.length }}</div>
-      <div class="result-item" v-for="(r, i) in results" :key="i">
+    <div class="results" v-if="filteredResults.length">
+      <div class="results-header">
+        <div class="results-count">{{ t('search.resultsCount') }}: {{ filteredResults.length }}</div>
+        <div class="fts-indicator" title="SQLite FTS5 Full-Text Search">⚡ FTS5</div>
+      </div>
+      <div class="result-item" v-for="(r, i) in filteredResults" :key="i">
         <div class="result-main">
           <span :class="['badge', sourceBadgeClass(r.source)]">{{ sourceLabel(r.source) }}</span>
+          <span
+            v-if="detectReleaseFormat(r.title) === 'lossless'"
+            class="badge badge-format-lossless"
+            @click.stop="setFilter('lossless')"
+            title="Фильтровать FLAC / Lossless"
+          >💎 FLAC</span>
+          <span
+            v-else-if="detectReleaseFormat(r.title) === 'mp3_320'"
+            class="badge badge-format-mp3"
+            @click.stop="setFilter('mp3_320')"
+            title="Фильтровать MP3 320"
+          >⚡ 320k</span>
           <div class="result-title" :title="r.title">{{ r.title }}</div>
         </div>
         <div class="result-meta">
@@ -725,6 +811,11 @@ function sourceBadgeClass(source: string) {
           📂 {{ t('search.chooseFilesBtn') }}
         </button>
       </div>
+    </div>
+
+    <div class="empty-filtered-state" v-else-if="results.length && !filteredResults.length">
+      <p>Ничего не найдено с активным фильтром "{{ activeFilter === 'lossless' ? t('search.filterLossless') : t('search.filterMp3320') }}".</p>
+      <button class="btn btn-ghost btn-sm" @click="setFilter('all')">Показать все раздачи ({{ results.length }})</button>
     </div>
 
     <div class="empty-state" v-else-if="!loading">
@@ -974,10 +1065,80 @@ function sourceBadgeClass(source: string) {
 .search-input { flex: 1; font-size: 15px; }
 .search-btn { padding: 9px 20px; font-size: 14px; }
 
+/* Quick Format & Bitrate Filter Badges */
+.filter-badges-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  user-select: none;
+}
+
+.filter-pill:hover {
+  background: var(--surface);
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-1px);
+}
+
+.filter-pill.active {
+  background: rgba(var(--accent-rgb, 100, 108, 255), 0.16);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(100, 108, 255, 0.35);
+  font-weight: 600;
+}
+
+.filter-pill.pill-lossless.active {
+  background: rgba(168, 85, 247, 0.2);
+  border-color: #a855f7;
+  color: #d8b4fe;
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.4);
+}
+
+.filter-pill.pill-mp3.active {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: #f59e0b;
+  color: #fde68a;
+  box-shadow: 0 0 14px rgba(245, 158, 11, 0.4);
+}
+
 .error-msg { color: var(--danger); font-size: 13px; }
 
 .results { display: flex; flex-direction: column; gap: 6px; }
-.results-count { font-size: 13px; color: var(--text2); margin-bottom: 4px; }
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.results-count { font-size: 13px; color: var(--text2); }
+
+.fts-indicator {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(33, 150, 243, 0.15);
+  color: #64b5f6;
+  border: 1px solid rgba(33, 150, 243, 0.3);
+  letter-spacing: 0.5px;
+}
 
 .result-item {
   display: grid;
@@ -1001,6 +1162,30 @@ function sourceBadgeClass(source: string) {
 .badge-magnet { background: #3a2a1a; color: #ff9800; border: 1px solid rgba(255, 152, 0, 0.3); }
 .badge-source { background: #1a3a2a; color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.3); }
 
+.badge-format-lossless {
+  background: rgba(168, 85, 247, 0.18);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.12s;
+}
+.badge-format-lossless:hover {
+  transform: scale(1.05);
+  border-color: #c084fc;
+}
+
+.badge-format-mp3 {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  cursor: pointer;
+  transition: transform 0.12s, border-color 0.12s;
+}
+.badge-format-mp3:hover {
+  transform: scale(1.05);
+  border-color: #fbbf24;
+}
+
 .result-meta { display: flex; gap: 12px; font-size: 13px; color: var(--text2); white-space: nowrap; }
 .seeders { color: #4caf50; font-weight: 600; }
 .seeders-pending {
@@ -1017,6 +1202,16 @@ function sourceBadgeClass(source: string) {
 .empty-state { text-align: center; padding: 60px 0; color: var(--text2); }
 .empty-icon { font-size: 56px; margin-bottom: 16px; }
 .empty-hint { font-size: 13px; margin-top: 8px; color: var(--text2); opacity: 0.6; }
+
+.empty-filtered-state {
+  text-align: center;
+  padding: 40px 0;
+  color: var(--text2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
 
 /* Modals */
 .modal-overlay {

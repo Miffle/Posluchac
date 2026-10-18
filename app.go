@@ -235,18 +235,23 @@ func parseMagnetInfo(raw string) (infoHash, title, magnetURI string, isMagnet bo
 	return "", "", "", false
 }
 
-// Search queries all indexed JSON sources and torrent backends.
-func (a *App) Search(query string) []search.Result {
+// Search queries all indexed JSON sources and torrent backends with optional format filtering.
+func (a *App) Search(query string, formatFilter string) []search.Result {
 	a.waitForSources()
 	var results []search.Result
 
 	trimmed := strings.TrimSpace(query)
 	infoHash, magnetTitle, magnetURI, isMagnet := parseMagnetInfo(trimmed)
 
+	cleanQuery, detectedFilter := sources.ParseQueryAndFilter(trimmed, formatFilter)
+	if detectedFilter != "" {
+		formatFilter = detectedFilter
+	}
+
 	if isMagnet {
 		// First check indexed sources for this magnet or hash
 		if a.sources != nil {
-			sourceRes := a.sources.Search(a.ctx, magnetURI, 20)
+			sourceRes := a.sources.Search(a.ctx, magnetURI, formatFilter, 20)
 			results = append(results, sourceRes...)
 		}
 
@@ -278,9 +283,35 @@ func (a *App) Search(query string) []search.Result {
 	}
 
 	if a.sources != nil {
-		results = append(results, a.sources.Search(a.ctx, query, 50)...)
+		results = append(results, a.sources.Search(a.ctx, cleanQuery, formatFilter, 50)...)
 	}
-	results = append(results, a.searcher.Search(a.ctx, query, 30)...)
+
+	// Prepare scraper query with typo correction from vocabulary if available
+	scraperBase := cleanQuery
+	if a.sources != nil {
+		if corrected, ok := a.sources.CorrectQuery(a.ctx, cleanQuery); ok {
+			scraperBase = corrected
+		}
+	}
+
+	scraperQuery := scraperBase
+	if formatFilter == "lossless" || formatFilter == "flac" {
+		scraperQuery = scraperBase + " flac"
+	} else if formatFilter == "mp3_320" || formatFilter == "320" {
+		scraperQuery = scraperBase + " 320"
+	}
+
+	scraperResults := a.searcher.Search(a.ctx, scraperQuery, 30)
+	if formatFilter != "" && formatFilter != "all" {
+		var filtered []search.Result
+		for _, r := range scraperResults {
+			if sources.MatchesFormat(r.Title, formatFilter) {
+				filtered = append(filtered, r)
+			}
+		}
+		scraperResults = filtered
+	}
+	results = append(results, scraperResults...)
 	return results
 }
 

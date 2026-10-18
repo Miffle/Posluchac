@@ -92,7 +92,7 @@ export function ScanLibrary():Promise<number>;
 
 export function ScrapeSeeders(arg1:Array<string>):Promise<Array<main.ScrapeSeederResult>>;
 
-export function Search(arg1:string):Promise<Array<search.Result>>;
+export function Search(arg1:string,arg2:string):Promise<Array<search.Result>>;
 
 export function SearchLibrary(arg1:string):Promise<Array<library.Track>>;
 

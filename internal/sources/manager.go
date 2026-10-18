@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"github.com/user/torrent-player/internal/search"
 )
@@ -46,6 +48,10 @@ type Manager struct {
 	db     *sql.DB
 	client *http.Client
 	stopCh chan struct{}
+
+	vocabMu        sync.RWMutex
+	vocabMap       map[string]int
+	vocabExpiresAt time.Time
 }
 
 // NewManager creates a sources manager and ensures DB tables exist.
@@ -125,6 +131,31 @@ func (m *Manager) initSchema() error {
 		magnet_uri TEXT NOT NULL,
 		FOREIGN KEY(source_id) REFERENCES sources(id) ON DELETE CASCADE
 	);
+
+	CREATE VIRTUAL TABLE IF NOT EXISTS source_downloads_fts USING fts5(
+		title,
+		content='source_downloads',
+		content_rowid='id',
+		tokenize='unicode61'
+	);
+
+	CREATE VIRTUAL TABLE IF NOT EXISTS source_downloads_vocab USING fts5vocab(
+		source_downloads_fts,
+		'row'
+	);
+
+	CREATE TRIGGER IF NOT EXISTS source_downloads_ai AFTER INSERT ON source_downloads BEGIN
+		INSERT INTO source_downloads_fts(rowid, title) VALUES (new.id, new.title);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS source_downloads_ad AFTER DELETE ON source_downloads BEGIN
+		INSERT INTO source_downloads_fts(source_downloads_fts, rowid, title) VALUES('delete', old.id, old.title);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS source_downloads_au AFTER UPDATE ON source_downloads BEGIN
+		INSERT INTO source_downloads_fts(source_downloads_fts, rowid, title) VALUES('delete', old.id, old.title);
+		INSERT INTO source_downloads_fts(rowid, title) VALUES (new.id, new.title);
+	END;
 	`
 	if _, err := m.db.Exec(tables); err != nil {
 		return err
@@ -141,6 +172,14 @@ func (m *Manager) initSchema() error {
 	`
 	if _, err := m.db.Exec(indices); err != nil {
 		return err
+	}
+
+	// Ensure FTS5 index is populated if source_downloads has rows but FTS5 doesn't
+	var mainCount, ftsCount int
+	_ = m.db.QueryRow(`SELECT count(*) FROM source_downloads`).Scan(&mainCount)
+	_ = m.db.QueryRow(`SELECT count(*) FROM source_downloads_fts`).Scan(&ftsCount)
+	if mainCount > 0 && ftsCount < mainCount {
+		_, _ = m.db.Exec(`INSERT INTO source_downloads_fts(source_downloads_fts) VALUES('rebuild')`)
 	}
 
 	// Backfill any empty title_lower in existing rows
@@ -237,6 +276,7 @@ func (m *Manager) AddSource(url string) (*Source, error) {
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
+	m.invalidateVocab()
 
 	// Record successful sync time.
 	now := time.Now()
@@ -268,6 +308,7 @@ func (m *Manager) SyncAll() error {
 func (m *Manager) DeleteSource(id int64) error {
 	_, _ = m.db.Exec(`DELETE FROM source_downloads WHERE source_id = ?`, id)
 	_, err := m.db.Exec(`DELETE FROM sources WHERE id = ?`, id)
+	m.invalidateVocab()
 	return err
 }
 
@@ -289,18 +330,397 @@ func (m *Manager) ListSources() ([]Source, error) {
 	return result, nil
 }
 
-// Search queries all indexed source downloads matching the given terms or magnet URI/hash.
-func (m *Manager) Search(ctx context.Context, query string, limit int) []search.Result {
+// ExtractTokens splits text into alphanumeric/Unicode words (letters and digits).
+func ExtractTokens(s string) []string {
+	var tokens []string
+	var cur []rune
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			cur = append(cur, r)
+		} else {
+			if len(cur) > 0 {
+				tokens = append(tokens, string(cur))
+				cur = nil
+			}
+		}
+	}
+	if len(cur) > 0 {
+		tokens = append(tokens, string(cur))
+	}
+	return tokens
+}
+
+// MatchesFormat checks if a release title matches a format filter ("lossless" or "mp3_320").
+func MatchesFormat(title string, format string) bool {
+	f := strings.ToLower(strings.TrimSpace(format))
+	if f == "" || f == "all" {
+		return true
+	}
+	tLower := strings.ToLower(title)
+	switch f {
+	case "lossless", "flac":
+		keywords := []string{"flac", "lossless", "ape", "alac", "wav", "24bit", "24-bit", "hi-res", "hires", "dsd", "sacd"}
+		for _, kw := range keywords {
+			if strings.Contains(tLower, kw) {
+				return true
+			}
+		}
+		return false
+	case "mp3_320", "320":
+		return strings.Contains(tLower, "320")
+	default:
+		return true
+	}
+}
+
+// ParseQueryAndFilter extracts inline directives like format:flac or format:320
+// and returns the clean search terms and the resolved format filter.
+func ParseQueryAndFilter(rawQuery string, explicitFilter string) (string, string) {
+	trimmed := strings.TrimSpace(rawQuery)
+	filter := strings.ToLower(strings.TrimSpace(explicitFilter))
+	if filter == "all" {
+		filter = ""
+	}
+
+	words := strings.Fields(trimmed)
+	var cleanWords []string
+	for _, w := range words {
+		lower := strings.ToLower(w)
+		if strings.HasPrefix(lower, "format:") {
+			val := strings.TrimPrefix(lower, "format:")
+			if val == "flac" || val == "lossless" {
+				if filter == "" {
+					filter = "lossless"
+				}
+			} else if val == "320" || val == "mp3_320" || val == "mp3" {
+				if filter == "" {
+					filter = "mp3_320"
+				}
+			}
+			continue
+		}
+		cleanWords = append(cleanWords, w)
+	}
+	return strings.Join(cleanWords, " "), filter
+}
+
+// BuildFTS5Query constructs an SQLite FTS5 MATCH expression from query terms and format filter.
+func BuildFTS5Query(query string, formatFilter string) string {
+	tokens := ExtractTokens(query)
+	var tokenExprs []string
+	for _, t := range tokens {
+		tClean := strings.ReplaceAll(t, `"`, "")
+		if tClean != "" {
+			tokenExprs = append(tokenExprs, fmt.Sprintf(`"%s"*`, tClean))
+		}
+	}
+
+	var baseExpr string
+	if len(tokenExprs) > 0 {
+		baseExpr = strings.Join(tokenExprs, " AND ")
+	}
+
+	var formatExpr string
+	f := strings.ToLower(strings.TrimSpace(formatFilter))
+	switch f {
+	case "lossless", "flac":
+		formatExpr = `(flac* OR lossless* OR ape* OR alac* OR wav* OR "24bit"*)`
+	case "mp3_320", "320":
+		formatExpr = `("320"*)`
+	}
+
+	if baseExpr != "" && formatExpr != "" {
+		return fmt.Sprintf("(%s) AND %s", baseExpr, formatExpr)
+	} else if formatExpr != "" {
+		return formatExpr
+	}
+	return baseExpr
+}
+
+func (m *Manager) invalidateVocab() {
+	m.vocabMu.Lock()
+	m.vocabMap = nil
+	m.vocabMu.Unlock()
+}
+
+func (m *Manager) getVocab(ctx context.Context) map[string]int {
+	m.vocabMu.RLock()
+	if m.vocabMap != nil && time.Now().Before(m.vocabExpiresAt) {
+		vm := m.vocabMap
+		m.vocabMu.RUnlock()
+		return vm
+	}
+	m.vocabMu.RUnlock()
+
+	m.vocabMu.Lock()
+	defer m.vocabMu.Unlock()
+
+	if m.vocabMap != nil && time.Now().Before(m.vocabExpiresAt) {
+		return m.vocabMap
+	}
+
+	rows, err := m.db.QueryContext(ctx, `SELECT term, cnt FROM source_downloads_vocab WHERE length(term) >= 3`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	vm := make(map[string]int)
+	for rows.Next() {
+		var term string
+		var cnt int
+		if err := rows.Scan(&term, &cnt); err == nil {
+			vm[term] = cnt
+		}
+	}
+
+	m.vocabMap = vm
+	m.vocabExpiresAt = time.Now().Add(5 * time.Minute)
+	return vm
+}
+
+// DamerauLevenshtein computes the edit distance between two rune slices,
+// supporting insertions, deletions, substitutions, and adjacent transpositions.
+func DamerauLevenshtein(a, b []rune) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+
+	d := make([][]int, la+1)
+	for i := range d {
+		d[i] = make([]int, lb+1)
+		d[i][0] = i
+	}
+	for j := 0; j <= lb; j++ {
+		d[0][j] = j
+	}
+
+	for i := 1; i <= la; i++ {
+		for j := 1; j <= lb; j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			d[i][j] = d[i-1][j] + 1 // deletion
+			if d[i][j-1]+1 < d[i][j] {
+				d[i][j] = d[i][j-1] + 1 // insertion
+			}
+			if d[i-1][j-1]+cost < d[i][j] {
+				d[i][j] = d[i-1][j-1] + cost // substitution
+			}
+			// transposition of adjacent characters
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				if d[i-2][j-2]+1 < d[i][j] {
+					d[i][j] = d[i-2][j-2] + 1
+				}
+			}
+		}
+	}
+	return d[la][lb]
+}
+
+// FindFuzzyCandidate finds the best matching term in vocab within edit distance 1 (or 2 for long words).
+func FindFuzzyCandidate(token string, vocab map[string]int) (string, bool) {
+	rToken := []rune(strings.ToLower(token))
+	lenToken := len(rToken)
+	if lenToken < 3 {
+		return "", false
+	}
+
+	// Exact match check
+	if _, ok := vocab[string(rToken)]; ok {
+		return string(rToken), true
+	}
+
+	maxDist := 1
+	if lenToken >= 8 {
+		maxDist = 2
+	}
+
+	bestMatch := ""
+	bestDist := maxDist + 1
+	bestCount := -1
+
+	for term, cnt := range vocab {
+		rTerm := []rune(term)
+		lenTerm := len(rTerm)
+
+		diff := lenToken - lenTerm
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > maxDist {
+			continue
+		}
+
+		dist := DamerauLevenshtein(rToken, rTerm)
+		if dist <= maxDist {
+			if dist < bestDist || (dist == bestDist && cnt > bestCount) {
+				bestDist = dist
+				bestMatch = term
+				bestCount = cnt
+			}
+		}
+	}
+
+	if bestMatch != "" {
+		return bestMatch, true
+	}
+	return "", false
+}
+
+// BuildFuzzyFTS5Query expands misspelled tokens with their closest vocabulary candidates.
+func BuildFuzzyFTS5Query(tokens []string, vocab map[string]int, formatFilter string) (string, string, bool) {
+	var tokenClauses []string
+	var correctedWords []string
+	hadCorrection := false
+
+	for _, t := range tokens {
+		tLower := strings.ToLower(t)
+		cand, found := FindFuzzyCandidate(tLower, vocab)
+		if found && cand != tLower {
+			tokenClauses = append(tokenClauses, fmt.Sprintf(`("%s"* OR "%s"*)`, tLower, cand))
+			correctedWords = append(correctedWords, cand)
+			hadCorrection = true
+		} else {
+			tokenClauses = append(tokenClauses, fmt.Sprintf(`"%s"*`, tLower))
+			correctedWords = append(correctedWords, tLower)
+		}
+	}
+
+	if !hadCorrection {
+		return "", strings.Join(tokens, " "), false
+	}
+
+	var baseExpr string
+	if len(tokenClauses) > 0 {
+		baseExpr = strings.Join(tokenClauses, " AND ")
+	}
+
+	var formatExpr string
+	f := strings.ToLower(strings.TrimSpace(formatFilter))
+	switch f {
+	case "lossless", "flac":
+		formatExpr = `(flac* OR lossless* OR ape* OR alac* OR wav* OR "24bit"*)`
+	case "mp3_320", "320":
+		formatExpr = `("320"*)`
+	}
+
+	var finalFts string
+	if baseExpr != "" && formatExpr != "" {
+		finalFts = fmt.Sprintf("(%s) AND %s", baseExpr, formatExpr)
+	} else if formatExpr != "" {
+		finalFts = formatExpr
+	} else {
+		finalFts = baseExpr
+	}
+
+	return finalFts, strings.Join(correctedWords, " "), true
+}
+
+// BuildRelaxedFTS5Query builds a relaxed OR query across terms, useful when multi-word queries
+// contain minor differences or typos, ranked by bm25.
+func BuildRelaxedFTS5Query(tokens []string, vocab map[string]int, formatFilter string) string {
+	var orClauses []string
+	for _, t := range tokens {
+		tLower := strings.ToLower(t)
+		cand, found := FindFuzzyCandidate(tLower, vocab)
+		if found && cand != tLower {
+			orClauses = append(orClauses, fmt.Sprintf(`"%s"*`, cand))
+		}
+		orClauses = append(orClauses, fmt.Sprintf(`"%s"*`, tLower))
+	}
+	if len(orClauses) == 0 {
+		return ""
+	}
+	baseExpr := fmt.Sprintf("(%s)", strings.Join(orClauses, " OR "))
+
+	var formatExpr string
+	f := strings.ToLower(strings.TrimSpace(formatFilter))
+	switch f {
+	case "lossless", "flac":
+		formatExpr = `(flac* OR lossless* OR ape* OR alac* OR wav* OR "24bit"*)`
+	case "mp3_320", "320":
+		formatExpr = `("320"*)`
+	}
+
+	if formatExpr != "" {
+		return fmt.Sprintf("%s AND %s", baseExpr, formatExpr)
+	}
+	return baseExpr
+}
+
+// CorrectQuery uses the vocabulary to correct misspelled words in query.
+// It returns the corrected query string and true if any corrections were made.
+func (m *Manager) CorrectQuery(ctx context.Context, query string) (string, bool) {
+	tokens := ExtractTokens(query)
+	if len(tokens) == 0 {
+		return query, false
+	}
+	vocab := m.getVocab(ctx)
+	if len(vocab) == 0 {
+		return query, false
+	}
+
+	var correctedTokens []string
+	hadCorrection := false
+
+	for _, t := range tokens {
+		tLower := strings.ToLower(t)
+		cand, found := FindFuzzyCandidate(tLower, vocab)
+		if found && cand != tLower {
+			correctedTokens = append(correctedTokens, cand)
+			hadCorrection = true
+		} else {
+			correctedTokens = append(correctedTokens, t)
+		}
+	}
+
+	if hadCorrection {
+		return strings.Join(correctedTokens, " "), true
+	}
+	return query, false
+}
+
+func (m *Manager) queryFTS5(ctx context.Context, ftsExpr string, formatFilter string, limit int) []search.Result {
+	ftsSQL := `
+		SELECT sd.title, sd.magnet_uri, s.name
+		FROM source_downloads_fts fts
+		JOIN source_downloads sd ON sd.id = fts.rowid
+		JOIN sources s ON s.id = sd.source_id
+		WHERE source_downloads_fts MATCH ?
+		ORDER BY bm25(source_downloads_fts) ASC
+		LIMIT ?`
+	rows, err := m.db.QueryContext(ctx, ftsSQL, ftsExpr, limit)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	return m.scanResults(rows, formatFilter)
+}
+
+// Search queries all indexed source downloads matching the given terms or magnet URI/hash,
+// using SQLite FTS5 full-text indexing with bm25 relevance ranking, typo tolerance, and format filtering.
+func (m *Manager) Search(ctx context.Context, query string, formatFilter string, limit int) []search.Result {
 	if m.db == nil || limit <= 0 {
 		return nil
 	}
 	trimmed := strings.TrimSpace(query)
-	if trimmed == "" {
+	if trimmed == "" && formatFilter == "" {
 		return nil
 	}
 
+	cleanQuery, detectedFilter := ParseQueryAndFilter(trimmed, formatFilter)
+	if detectedFilter != "" {
+		formatFilter = detectedFilter
+	}
+
 	// Check if search query is a magnet link or infohash
-	lowerQuery := strings.ToLower(trimmed)
+	lowerQuery := strings.ToLower(cleanQuery)
 	var hashToFind string
 	if strings.HasPrefix(lowerQuery, "magnet:") {
 		// Look for xt=urn:btih:
@@ -312,60 +732,114 @@ func (m *Manager) Search(ctx context.Context, query string, limit int) []search.
 				hashToFind = rem
 			}
 		}
-	} else if (len(trimmed) == 40 || len(trimmed) == 32) && !strings.ContainsAny(trimmed, " \t\r\n") {
+	} else if (len(cleanQuery) == 40 || len(cleanQuery) == 32) && !strings.ContainsAny(cleanQuery, " \t\r\n") {
 		hashToFind = lowerQuery
 	}
 
-	var sqlQuery string
-	var args []any
-
 	if hashToFind != "" {
-		sqlQuery = `
+		sqlQuery := `
 			SELECT sd.title, sd.magnet_uri, s.name
 			FROM source_downloads sd
 			JOIN sources s ON s.id = sd.source_id
 			WHERE sd.magnet_uri LIKE ?
 			LIMIT ?`
-		args = []any{"%" + hashToFind + "%", limit}
-	} else {
-		words := strings.Fields(lowerQuery)
-		if len(words) == 0 {
+		rows, err := m.db.QueryContext(ctx, sqlQuery, "%"+hashToFind+"%", limit)
+		if err != nil {
 			return nil
 		}
-
-		var whereClauses []string
-		for _, w := range words {
-			wClean := strings.ReplaceAll(w, "%", "")
-			wClean = strings.ReplaceAll(wClean, "_", "")
-			if wClean == "" {
-				continue
-			}
-			whereClauses = append(whereClauses, "(sd.title_lower LIKE ? OR sd.magnet_uri LIKE ?)")
-			args = append(args, "%"+wClean+"%", "%"+wClean+"%")
-		}
-		if len(whereClauses) == 0 {
-			return nil
-		}
-		args = append(args, limit)
-
-		sqlQuery = fmt.Sprintf(`
-			SELECT sd.title, sd.magnet_uri, s.name
-			FROM source_downloads sd
-			JOIN sources s ON s.id = sd.source_id
-			WHERE %s
-			LIMIT ?`, strings.Join(whereClauses, " AND "))
+		defer rows.Close()
+		return m.scanResults(rows, formatFilter)
 	}
+
+	// 1. Text query: Try direct SQLite FTS5 first
+	ftsExpr := BuildFTS5Query(cleanQuery, formatFilter)
+	if ftsExpr != "" {
+		results := m.queryFTS5(ctx, ftsExpr, formatFilter, limit)
+		if len(results) > 0 {
+			return results
+		}
+	}
+
+	// 2. Fuzzy / Typo tolerant matching via FTS5 vocabulary
+	tokens := ExtractTokens(cleanQuery)
+	if len(tokens) > 0 {
+		vocab := m.getVocab(ctx)
+		if len(vocab) > 0 {
+			fuzzyExpr, _, hadCorrection := BuildFuzzyFTS5Query(tokens, vocab, formatFilter)
+			if hadCorrection && fuzzyExpr != "" {
+				results := m.queryFTS5(ctx, fuzzyExpr, formatFilter, limit)
+				if len(results) > 0 {
+					return results
+				}
+			}
+
+			// 2b. If strict AND produced 0, try relaxed OR ranking across candidates
+			if len(tokens) > 1 {
+				relaxedExpr := BuildRelaxedFTS5Query(tokens, vocab, formatFilter)
+				if relaxedExpr != "" {
+					results := m.queryFTS5(ctx, relaxedExpr, formatFilter, limit)
+					if len(results) > 0 {
+						return results
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Fallback to LIKE if FTS produced 0 results or encountered an error
+	return m.searchLikeFallback(ctx, cleanQuery, formatFilter, limit)
+}
+
+func (m *Manager) searchLikeFallback(ctx context.Context, query string, formatFilter string, limit int) []search.Result {
+	words := strings.Fields(strings.ToLower(query))
+	var whereClauses []string
+	var args []any
+
+	for _, w := range words {
+		wClean := strings.ReplaceAll(w, "%", "")
+		wClean = strings.ReplaceAll(wClean, "_", "")
+		if wClean == "" {
+			continue
+		}
+		whereClauses = append(whereClauses, "(sd.title_lower LIKE ? OR sd.magnet_uri LIKE ?)")
+		args = append(args, "%"+wClean+"%", "%"+wClean+"%")
+	}
+
+	f := strings.ToLower(formatFilter)
+	if f == "lossless" || f == "flac" {
+		whereClauses = append(whereClauses, "(sd.title_lower LIKE '%flac%' OR sd.title_lower LIKE '%lossless%' OR sd.title_lower LIKE '%ape%' OR sd.title_lower LIKE '%alac%' OR sd.title_lower LIKE '%wav%' OR sd.title_lower LIKE '%24bit%')")
+	} else if f == "mp3_320" || f == "320" {
+		whereClauses = append(whereClauses, "sd.title_lower LIKE '%320%'")
+	}
+
+	if len(whereClauses) == 0 {
+		return nil
+	}
+	args = append(args, limit)
+
+	sqlQuery := fmt.Sprintf(`
+		SELECT sd.title, sd.magnet_uri, s.name
+		FROM source_downloads sd
+		JOIN sources s ON s.id = sd.source_id
+		WHERE %s
+		LIMIT ?`, strings.Join(whereClauses, " AND "))
 
 	rows, err := m.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
+	return m.scanResults(rows, "")
+}
 
+func (m *Manager) scanResults(rows *sql.Rows, formatFilter string) []search.Result {
 	var results []search.Result
 	for rows.Next() {
 		var title, magnetURI, sourceName string
 		if err := rows.Scan(&title, &magnetURI, &sourceName); err == nil {
+			if formatFilter != "" && !MatchesFormat(title, formatFilter) {
+				continue
+			}
 			results = append(results, search.Result{
 				Title:     title,
 				MagnetURI: magnetURI,

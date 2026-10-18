@@ -170,8 +170,8 @@ export function ScrapeSeeders(arg1) {
   return window['go']['main']['App']['ScrapeSeeders'](arg1);
 }
 
-export function Search(arg1) {
-  return window['go']['main']['App']['Search'](arg1);
+export function Search(arg1, arg2) {
+  return window['go']['main']['App']['Search'](arg1, arg2);
 }
 
 export function SearchLibrary(arg1) {
