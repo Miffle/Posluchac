@@ -164,6 +164,39 @@ export namespace library {
 
 }
 
+export namespace lyrics {
+	
+	export class Result {
+	    found: boolean;
+	    artist: string;
+	    title: string;
+	    album: string;
+	    duration: number;
+	    instrumental: boolean;
+	    plainLyrics: string;
+	    syncedLyrics: string;
+	    source: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Result(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.found = source["found"];
+	        this.artist = source["artist"];
+	        this.title = source["title"];
+	        this.album = source["album"];
+	        this.duration = source["duration"];
+	        this.instrumental = source["instrumental"];
+	        this.plainLyrics = source["plainLyrics"];
+	        this.syncedLyrics = source["syncedLyrics"];
+	        this.source = source["source"];
+	    }
+	}
+
+}
+
 export namespace main {
 	
 	export class PendingTorrent {
@@ -199,6 +232,26 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	export class ScrapeSeederResult {
+	    infoHash: string;
+	    magnetUri: string;
+	    seeders: number;
+	    leechers: number;
+	    completed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScrapeSeederResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.infoHash = source["infoHash"];
+	        this.magnetUri = source["magnetUri"];
+	        this.seeders = source["seeders"];
+	        this.leechers = source["leechers"];
+	        this.completed = source["completed"];
+	    }
 	}
 
 }
@@ -245,6 +298,8 @@ export namespace sources {
 	    itemCount: number;
 	    // Go type: time
 	    updatedAt: any;
+	    // Go type: time
+	    syncedAt: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new Source(source);
@@ -257,6 +312,7 @@ export namespace sources {
 	        this.url = source["url"];
 	        this.itemCount = source["itemCount"];
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.syncedAt = this.convertValues(source["syncedAt"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

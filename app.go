@@ -21,6 +21,7 @@ import (
 	"github.com/user/torrent-player/internal/audio"
 	"github.com/user/torrent-player/internal/hotkeys"
 	"github.com/user/torrent-player/internal/library"
+	"github.com/user/torrent-player/internal/lyrics"
 	"github.com/user/torrent-player/internal/metadata"
 	"github.com/user/torrent-player/internal/search"
 	"github.com/user/torrent-player/internal/sources"
@@ -36,8 +37,10 @@ type App struct {
 	player       *audio.Player
 	library      *library.DB
 	sources      *sources.Manager
+	scraper      *sources.Scraper
 	searcher     *search.MultiSearcher
 	rutracker    *search.RutrackerSearcher
+	lyrics       *lyrics.Client
 	hotkeys      *hotkeys.Manager
 	dataDir      string
 	downloadDir  string
@@ -66,6 +69,7 @@ func NewApp() *App {
 	return &App{
 		dataDir:      dataDir,
 		downloadDir:  dlDir,
+		lyrics:       lyrics.NewClient(),
 		readySources: make(chan struct{}),
 	}
 }
@@ -93,8 +97,12 @@ func (a *App) startup(ctx context.Context) {
 		a.sources, sErr = sources.NewManager(sqlDB)
 		if sErr != nil {
 			fmt.Println("sources manager error:", sErr)
+		} else {
+			// Start background auto-sync (refreshes stale sources every 24 h).
+			a.sources.StartAutoSync()
 		}
 	}
+	a.scraper = sources.NewScraper()
 	close(a.readySources)
 
 	a.engine, err = torrentpkg.NewEngine(cacheDir, dlDir, sqlDB)
@@ -135,6 +143,9 @@ func (a *App) shutdown(_ context.Context) {
 	trayRemoveIcon()
 	if a.hotkeys != nil {
 		a.hotkeys.Stop()
+	}
+	if a.sources != nil {
+		a.sources.Stop()
 	}
 	a.player.Stop()
 	a.engine.Close()
@@ -227,18 +238,23 @@ func parseMagnetInfo(raw string) (infoHash, title, magnetURI string, isMagnet bo
 	return "", "", "", false
 }
 
-// Search queries all indexed JSON sources and torrent backends.
-func (a *App) Search(query string) []search.Result {
+// Search queries all indexed JSON sources and torrent backends with optional format filtering.
+func (a *App) Search(query string, formatFilter string) []search.Result {
 	a.waitForSources()
 	var results []search.Result
 
 	trimmed := strings.TrimSpace(query)
 	infoHash, magnetTitle, magnetURI, isMagnet := parseMagnetInfo(trimmed)
 
+	cleanQuery, detectedFilter := sources.ParseQueryAndFilter(trimmed, formatFilter)
+	if detectedFilter != "" {
+		formatFilter = detectedFilter
+	}
+
 	if isMagnet {
 		// First check indexed sources for this magnet or hash
 		if a.sources != nil {
-			sourceRes := a.sources.Search(a.ctx, magnetURI, 20)
+			sourceRes := a.sources.Search(a.ctx, magnetURI, formatFilter, 20)
 			results = append(results, sourceRes...)
 		}
 
@@ -270,9 +286,35 @@ func (a *App) Search(query string) []search.Result {
 	}
 
 	if a.sources != nil {
-		results = append(results, a.sources.Search(a.ctx, query, 50)...)
+		results = append(results, a.sources.Search(a.ctx, cleanQuery, formatFilter, 50)...)
 	}
-	results = append(results, a.searcher.Search(a.ctx, query, 30)...)
+
+	// Prepare scraper query with typo correction from vocabulary if available
+	scraperBase := cleanQuery
+	if a.sources != nil {
+		if corrected, ok := a.sources.CorrectQuery(a.ctx, cleanQuery); ok {
+			scraperBase = corrected
+		}
+	}
+
+	scraperQuery := scraperBase
+	if formatFilter == "lossless" || formatFilter == "flac" {
+		scraperQuery = scraperBase + " flac"
+	} else if formatFilter == "mp3_320" || formatFilter == "320" {
+		scraperQuery = scraperBase + " 320"
+	}
+
+	scraperResults := a.searcher.Search(a.ctx, scraperQuery, 30)
+	if formatFilter != "" && formatFilter != "all" {
+		var filtered []search.Result
+		for _, r := range scraperResults {
+			if sources.MatchesFormat(r.Title, formatFilter) {
+				filtered = append(filtered, r)
+			}
+		}
+		scraperResults = filtered
+	}
+	results = append(results, scraperResults...)
 	return results
 }
 
@@ -310,6 +352,88 @@ func (a *App) SyncSources() error {
 		return nil
 	}
 	return a.sources.SyncAll()
+}
+
+// ScrapeSeederResult is returned per-hash by ScrapeSeeders.
+type ScrapeSeederResult struct {
+	InfoHash  string `json:"infoHash"`
+	MagnetURI string `json:"magnetUri"` // original magnet URI passed by caller
+	Seeders   int    `json:"seeders"`
+	Leechers  int    `json:"leechers"`
+	Completed int    `json:"completed"`
+}
+
+// ScrapeSeeders fetches real seeder/leecher counts from public UDP trackers
+// for the supplied magnet URIs or hex info-hashes.
+//
+// The call blocks for up to ~3 seconds while trackers are queried in parallel,
+// then returns the best result found across all trackers. Already-cached
+// results (fresh within 30 min) are returned immediately without re-scraping.
+func (a *App) ScrapeSeeders(magnetOrHashes []string) []ScrapeSeederResult {
+	if a.scraper == nil || len(magnetOrHashes) == 0 {
+		return nil
+	}
+
+	publicTrackers := []string{
+		"udp://tracker.opentrackr.org:1337",
+		"udp://open.stealth.si:80",
+		"udp://tracker.openbittorrent.com:6969",
+		"udp://exodus.desync.com:6969",
+		"udp://tracker.torrent.eu.org:451",
+	}
+
+	// Deduplicate and extract hex infohashes; keep original magnet for response.
+	type entry struct {
+		hex    string
+		magnet string
+	}
+	var entries []entry
+	seen := make(map[string]bool)
+	for _, raw := range magnetOrHashes {
+		h := sources.ExtractInfoHash(raw)
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		entries = append(entries, entry{hex: h, magnet: raw})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+
+	hexList := make([]string, len(entries))
+	for i, e := range entries {
+		hexList[i] = e.hex
+	}
+
+	trackerSet := make(map[string]bool)
+	for _, t := range publicTrackers {
+		trackerSet[t] = true
+	}
+	for _, raw := range magnetOrHashes {
+		for _, tr := range sources.ExtractTrackers(raw) {
+			trackerSet[tr] = true
+		}
+	}
+	allTrackers := make([]string, 0, len(trackerSet))
+	for t := range trackerSet {
+		allTrackers = append(allTrackers, t)
+	}
+
+	// Synchronous scrape — blocks until all trackers respond or 2s timeout.
+	scraped := a.scraper.ScrapeSync(allTrackers, hexList)
+
+	out := make([]ScrapeSeederResult, 0, len(entries))
+	for _, e := range entries {
+		r := ScrapeSeederResult{InfoHash: e.hex, MagnetURI: e.magnet}
+		if sr, ok := scraped[e.hex]; ok {
+			r.Seeders = sr.Seeders
+			r.Leechers = sr.Leechers
+			r.Completed = sr.Completed
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // LoginRutracker authenticates with Rutracker via username/password and enables Rutracker in search.
@@ -1068,4 +1192,16 @@ func (a *App) ApplyUpdate(downloadURL string) error {
 // OpenExternalURL opens a URL in the user's default browser.
 func (a *App) OpenExternalURL(url string) error {
 	return updater.OpenURL(url)
+}
+
+// ─── Lyrics (LRC) ────────────────────────────────────────────────────────────
+
+// GetLyrics searches for synchronized or plain lyrics from local files or LRCLIB.
+func (a *App) GetLyrics(artist, title, album string, durationSec float64, filePath string) (*lyrics.Result, error) {
+	if a.lyrics == nil {
+		a.lyrics = lyrics.NewClient()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	return a.lyrics.GetLyrics(ctx, artist, title, album, durationSec, filePath)
 }

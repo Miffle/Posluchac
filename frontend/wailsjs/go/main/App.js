@@ -82,6 +82,10 @@ export function GetLibrary() {
   return window['go']['main']['App']['GetLibrary']();
 }
 
+export function GetLyrics(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['main']['App']['GetLyrics'](arg1, arg2, arg3, arg4, arg5);
+}
+
 export function GetPlaylistTracks(arg1) {
   return window['go']['main']['App']['GetPlaylistTracks'](arg1);
 }
@@ -166,8 +170,12 @@ export function ScanLibrary() {
   return window['go']['main']['App']['ScanLibrary']();
 }
 
-export function Search(arg1) {
-  return window['go']['main']['App']['Search'](arg1);
+export function ScrapeSeeders(arg1) {
+  return window['go']['main']['App']['ScrapeSeeders'](arg1);
+}
+
+export function Search(arg1, arg2) {
+  return window['go']['main']['App']['Search'](arg1, arg2);
 }
 
 export function SearchLibrary(arg1) {
