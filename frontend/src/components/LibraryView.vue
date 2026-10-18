@@ -14,7 +14,7 @@ import { useDialogStore } from '../store/dialog'
 import { useI18n } from '../i18n'
 import AddToPlaylistModal from './AddToPlaylistModal.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 interface Track {
   id: number
@@ -60,24 +60,24 @@ const playlistsStore = usePlaylistsStore()
 const dialog = useDialogStore()
 const trackForPlaylist = ref<Track | null>(null)
 
-function openAddToPlaylist(t: Track) {
+function openAddToPlaylist(track: Track) {
   playlistsStore.loadPlaylists()
-  trackForPlaylist.value = t
+  trackForPlaylist.value = track
 }
 
-function isTrackActive(t: Track): boolean {
-  return player.status.track?.filePath === t.filePath
+function isTrackActive(track: Track): boolean {
+  return player.status.track?.filePath === track.filePath
 }
 
-function isTrackPlaying(t: Track): boolean {
-  return isTrackActive(t) && player.isPlaying
+function isTrackPlaying(track: Track): boolean {
+  return isTrackActive(track) && player.isPlaying
 }
 
-function handleTrackPlayClick(t: Track, list?: Track[]) {
-  if (isTrackActive(t)) {
+function handleTrackPlayClick(track: Track, list?: Track[]) {
+  if (isTrackActive(track)) {
     player.togglePause()
   } else {
-    playTrackInQueue(t, list)
+    playTrackInQueue(track, list)
   }
 }
 
@@ -99,8 +99,8 @@ async function loadTracks() {
       res = ((await GetFavourites()) || []) as Track[]
       if (query.value.trim()) {
         const qWords = query.value.toLowerCase().trim().split(/\s+/)
-        res = res.filter(t => {
-          const text = `${t.title} ${t.artist} ${t.album} ${t.fileName}`.toLowerCase()
+        res = res.filter(tr => {
+          const text = `${tr.title} ${tr.artist} ${tr.album} ${tr.fileName}`.toLowerCase()
           return qWords.every(w => text.includes(w))
         })
       }
@@ -128,22 +128,22 @@ async function refreshLibrary() {
   }
 }
 
-async function deleteTrack(t: Track) {
+async function deleteTrack(track: Track) {
   const confirmed = await dialog.confirm({
-    title: 'Удаление трека',
-    message: `Удалить трек «${t.title || t.fileName}»?`,
-    details: 'Файл будет удален из библиотеки и с диска.',
-    confirmText: 'Удалить',
+    title: t('library.deleteConfirmTitle'),
+    message: t('library.deleteConfirmMsg', { title: track.title || track.fileName }),
+    details: t('library.deleteConfirmDetails'),
+    confirmText: t('common.delete'),
     danger: true
   })
   if (!confirmed) return
 
   try {
-    await DeleteLibraryTrack(t.id, true)
+    await DeleteLibraryTrack(track.id, true)
     await loadTracks()
   } catch (e: any) {
     await dialog.alert({
-      title: 'Ошибка при удалении',
+      title: t('common.error'),
       message: e?.message || String(e),
       type: 'error'
     })
@@ -161,7 +161,7 @@ async function toggleFav(track: Track) {
   track.favourite = !track.favourite
 }
 
-function playTrackInQueue(t: Track, list?: Track[]) {
+function playTrackInQueue(track: Track, list?: Track[]) {
   const source = list && list.length > 0 ? list : tracks.value
   const queue = source.map(item => ({
     infoHash: item.infoHash,
@@ -172,7 +172,7 @@ function playTrackInQueue(t: Track, list?: Track[]) {
     album: item.album,
     coverPath: item.coverPath
   }))
-  player.play(t.infoHash, t.filePath, queue)
+  player.play(track.infoHash, track.filePath, queue)
 }
 
 function playArtist(artist: ArtistGroup) {
@@ -193,16 +193,19 @@ function formatDuration(sec: number) {
 }
 
 function formatDurationTotal(sec: number): string {
-  if (!sec) return '0 мин'
+  if (!sec) return '0 ' + t('library.min')
   const h = Math.floor(sec / 3600)
   const m = Math.floor((sec % 3600) / 60)
   if (h > 0) {
-    return `${h} ч ${m} мин`
+    return `${h} ${t('library.hr')} ${m} ${t('library.min')}`
   }
-  return `${m} мин`
+  return `${m} ${t('library.min')}`
 }
 
 function pluralTracks(count: number): string {
+  if (locale.value === 'en') {
+    return count === 1 ? 'track' : 'tracks'
+  }
   const n = Math.abs(count) % 100
   const n1 = n % 10
   if (n > 10 && n < 20) return 'треков'
@@ -212,6 +215,9 @@ function pluralTracks(count: number): string {
 }
 
 function pluralAlbums(count: number): string {
+  if (locale.value === 'en') {
+    return count === 1 ? 'album' : 'albums'
+  }
   const n = Math.abs(count) % 100
   const n1 = n % 10
   if (n > 10 && n < 20) return 'альбомов'
@@ -229,8 +235,9 @@ const artistsList = computed<ArtistGroup[]>(() => {
     totalDuration: number
   }>()
 
-  for (const t of tracks.value) {
-    const artistName = (t.artist || 'Неизвестный исполнитель').trim()
+  for (const tr of tracks.value) {
+    const rawArtist = (tr.artist || '').trim()
+    const artistName = (rawArtist && rawArtist !== 'Неизвестный исполнитель') ? rawArtist : t('library.unknownArtist')
     if (!map.has(artistName)) {
       map.set(artistName, {
         name: artistName,
@@ -240,38 +247,39 @@ const artistsList = computed<ArtistGroup[]>(() => {
       })
     }
     const a = map.get(artistName)!
-    a.tracks.push(t)
-    a.totalDuration += t.durationSec || 0
-    if (!a.coverPath && t.coverPath) {
-      a.coverPath = t.coverPath
+    a.tracks.push(tr)
+    a.totalDuration += tr.durationSec || 0
+    if (!a.coverPath && tr.coverPath) {
+      a.coverPath = tr.coverPath
     }
   }
 
   const result: ArtistGroup[] = Array.from(map.values()).map(a => {
     const albumMap = new Map<string, { name: string; year: number; coverPath?: string; tracks: Track[] }>()
-    for (const t of a.tracks) {
-      const albName = (t.album || 'Синглы и отдельные треки').trim()
+    for (const tr of a.tracks) {
+      const albName = (tr.album || t('library.singlesAndTracks')).trim()
       if (!albumMap.has(albName)) {
         albumMap.set(albName, {
           name: albName,
-          year: t.year || 0,
-          coverPath: t.coverPath,
+          year: tr.year || 0,
+          coverPath: tr.coverPath,
           tracks: []
         })
       }
       const alb = albumMap.get(albName)!
-      alb.tracks.push(t)
-      if (!alb.coverPath && t.coverPath) {
-        alb.coverPath = t.coverPath
+      alb.tracks.push(tr)
+      if (!alb.coverPath && tr.coverPath) {
+        alb.coverPath = tr.coverPath
       }
-      if (!alb.year && t.year) {
-        alb.year = t.year
+      if (!alb.year && tr.year) {
+        alb.year = tr.year
       }
     }
 
     const albums: AlbumGroup[] = Array.from(albumMap.values()).sort((x, y) => {
-      if (x.name === 'Синглы и отдельные треки') return 1
-      if (y.name === 'Синглы и отдельные треки') return -1
+      const singlesTitle = t('library.singlesAndTracks')
+      if (x.name === singlesTitle || x.name === 'Синглы и отдельные треки' || x.name === 'Singles & loose tracks') return 1
+      if (y.name === singlesTitle || y.name === 'Синглы и отдельные треки' || y.name === 'Singles & loose tracks') return -1
       if (x.year && y.year && x.year !== y.year) return y.year - x.year
       return x.name.localeCompare(y.name, undefined, { sensitivity: 'base' })
     })
@@ -340,25 +348,25 @@ watch(filteredArtists, (newArtists) => {
     <!-- Empty State -->
     <div class="empty-state" v-if="!loading && !tracks.length">
       <div class="empty-icon">🎵</div>
-      <p v-if="tab === 'favourites'">Избранных треков пока нет</p>
-      <p v-else>Библиотека пуста</p>
+      <p v-if="tab === 'favourites'">{{ t('library.emptyFavourites') }}</p>
+      <p v-else>{{ t('library.empty') }}</p>
       <p class="empty-hint" v-if="tab === 'favourites'">
-        Нажмите на сердечко рядом с любимым треком, чтобы добавить его в избранное!
+        {{ t('library.emptyFavouritesDesc') }}
       </p>
       <p class="empty-hint" v-else>
-        Скачивайте треки через поиск или просто скопируйте любые аудиофайлы в папку <code>Music/Posluchac</code> (или <code>Music/TorrentPlayer</code>) — они появятся здесь автоматически!
+        {{ t('library.emptyDesc') }}
       </p>
     </div>
 
-    <!-- Tab: По исполнителям -->
+    <!-- Tab: Artists -->
     <div class="artists-layout" v-else-if="tab === 'artists'">
       <!-- Left sidebar: artists list -->
       <div class="artists-sidebar">
         <div class="artists-search" v-if="artistsList.length > 5">
-          <input v-model="artistFilter" type="text" placeholder="Фильтр исполнителей..." />
+          <input v-model="artistFilter" type="text" :placeholder="t('library.filterArtists')" />
         </div>
         <div class="artists-list-header">
-          <span>Исполнители ({{ filteredArtists.length }})</span>
+          <span>{{ t('library.artistsCount') }} ({{ filteredArtists.length }})</span>
         </div>
         <div class="artists-list">
           <div
@@ -400,7 +408,7 @@ watch(filteredArtists, (newArtists) => {
             <span v-else class="hero-placeholder">👤</span>
           </div>
           <div class="artist-hero-info">
-            <div class="hero-subtitle">Исполнитель</div>
+            <div class="hero-subtitle">{{ t('library.artistHeader') }}</div>
             <h2 class="hero-name">{{ selectedArtist.name }}</h2>
             <div class="hero-stats">
               <span>{{ selectedArtist.tracks.length }} {{ pluralTracks(selectedArtist.tracks.length) }}</span>
@@ -411,7 +419,7 @@ watch(filteredArtists, (newArtists) => {
             </div>
             <div class="hero-actions">
               <button class="btn btn-accent btn-play-all" @click="playArtist(selectedArtist)">
-                ▶ Слушать все треки
+                ▶ {{ t('library.playArtistAll') }}
               </button>
             </div>
           </div>
@@ -443,44 +451,44 @@ watch(filteredArtists, (newArtists) => {
                   <span>{{ album.tracks.length }} {{ pluralTracks(album.tracks.length) }}</span>
                 </div>
               </div>
-              <button class="btn btn-ghost btn-sm album-play-btn" @click="playAlbum(album.tracks)" title="Слушать этот альбом">
-                ▶ Слушать альбом
+              <button class="btn btn-ghost btn-sm album-play-btn" @click="playAlbum(album.tracks)" :title="t('library.playAlbum')">
+                ▶ {{ t('library.playAlbum') }}
               </button>
             </div>
 
             <div class="album-track-list">
               <div
-                v-for="(t, idx) in album.tracks"
-                :key="t.id"
+                v-for="(track, idx) in album.tracks"
+                :key="track.id"
                 class="track-row album-row"
-                @dblclick="handleTrackPlayClick(t, selectedArtist.tracks)"
-                :class="{ playing: isTrackActive(t) }"
+                @dblclick="handleTrackPlayClick(track, selectedArtist.tracks)"
+                :class="{ playing: isTrackActive(track) }"
               >
                 <span class="track-num">{{ idx + 1 }}</span>
                 <button
                   class="play-btn"
-                  :class="{ 'is-playing': isTrackPlaying(t) }"
-                  @click.stop="handleTrackPlayClick(t, selectedArtist.tracks)"
-                  :title="isTrackPlaying(t) ? 'Пауза' : 'Воспроизвести'"
+                  :class="{ 'is-playing': isTrackPlaying(track) }"
+                  @click.stop="handleTrackPlayClick(track, selectedArtist.tracks)"
+                  :title="isTrackPlaying(track) ? t('common.pause') : t('common.play')"
                 >
-                  {{ isTrackPlaying(t) ? '⏸' : '▶' }}
+                  {{ isTrackPlaying(track) ? '⏸' : '▶' }}
                 </button>
                 <div class="track-info">
-                  <div class="track-title">{{ t.title || t.fileName }}</div>
+                  <div class="track-title">{{ track.title || track.fileName }}</div>
                 </div>
-                <div class="track-genre" v-if="t.genre">{{ t.genre }}</div>
-                <div class="track-duration">{{ formatDuration(t.durationSec) }}</div>
+                <div class="track-genre" v-if="track.genre">{{ track.genre }}</div>
+                <div class="track-duration">{{ formatDuration(track.durationSec) }}</div>
                 <div class="track-actions">
                   <button
                     class="fav-btn"
-                    :class="{ active: t.favourite }"
-                    @click.stop="toggleFav(t)"
-                    :title="t.favourite ? 'Убрать из избранного' : 'В избранное'"
+                    :class="{ active: track.favourite }"
+                    @click.stop="toggleFav(track)"
+                    :title="track.favourite ? '❤️' : '🤍'"
                   >
-                    {{ t.favourite ? '❤️' : '🤍' }}
+                    {{ track.favourite ? '❤️' : '🤍' }}
                   </button>
-                  <button class="action-btn playlist-btn" @click.stop="openAddToPlaylist(t)" title="Добавить в плейлист">📋+</button>
-                  <button class="del-btn" @click.stop="deleteTrack(t)" title="Удалить трек">🗑</button>
+                  <button class="action-btn playlist-btn" @click.stop="openAddToPlaylist(track)" :title="t('library.addToPlaylist')">📋+</button>
+                  <button class="del-btn" @click.stop="deleteTrack(track)" :title="t('library.deleteTrack')">🗑</button>
                 </div>
               </div>
             </div>
@@ -490,40 +498,40 @@ watch(filteredArtists, (newArtists) => {
 
       <div class="empty-state" v-else>
         <div class="empty-icon">👥</div>
-        <p>Исполнители не найдены</p>
+        <p>{{ t('library.noArtists') }}</p>
       </div>
     </div>
 
-    <!-- Tab: Все треки / Избранное (flat list) -->
+    <!-- Tab: All tracks / Favourites (flat list) -->
     <div class="all-tracks-container" v-else>
       <div class="tracks-toolbar">
         <span class="tracks-total">{{ tracks.length }} {{ pluralTracks(tracks.length) }}</span>
         <button class="btn btn-accent btn-sm" @click="playTrackInQueue(tracks[0])" v-if="tracks.length">
-          ▶ Воспроизвести все
+          ▶ {{ t('library.playAll') }}
         </button>
       </div>
 
       <div class="track-list">
         <div
           class="track-row flat-row"
-          v-for="(t, idx) in tracks"
-          :key="t.id"
-          @dblclick="handleTrackPlayClick(t)"
-          :class="{ playing: isTrackActive(t) }"
+          v-for="(track, idx) in tracks"
+          :key="track.id"
+          @dblclick="handleTrackPlayClick(track)"
+          :class="{ playing: isTrackActive(track) }"
         >
           <span class="track-num">{{ idx + 1 }}</span>
           <button
             class="play-btn"
-            :class="{ 'is-playing': isTrackPlaying(t) }"
-            @click.stop="handleTrackPlayClick(t)"
-            :title="isTrackPlaying(t) ? 'Пауза' : 'Воспроизвести'"
+            :class="{ 'is-playing': isTrackPlaying(track) }"
+            @click.stop="handleTrackPlayClick(track)"
+            :title="isTrackPlaying(track) ? t('common.pause') : t('common.play')"
           >
-            {{ isTrackPlaying(t) ? '⏸' : '▶' }}
+            {{ isTrackPlaying(track) ? '⏸' : '▶' }}
           </button>
           <div class="track-cover-thumb-box">
             <img
-              v-if="t.coverPath"
-              :src="'/api/cover?path=' + encodeURIComponent(t.coverPath)"
+              v-if="track.coverPath"
+              :src="'/api/cover?path=' + encodeURIComponent(track.coverPath)"
               class="track-cover-thumb"
               alt="Cover"
               @error="($event.target as HTMLElement).style.display = 'none'"
@@ -531,26 +539,26 @@ watch(filteredArtists, (newArtists) => {
             <span v-else class="track-cover-placeholder">🎵</span>
           </div>
           <div class="track-info">
-            <div class="track-title">{{ t.title || t.fileName }}</div>
+            <div class="track-title">{{ track.title || track.fileName }}</div>
             <div class="track-meta-line">
-              <span class="track-artist-name">{{ t.artist || 'Неизвестный исполнитель' }}</span>
-              <span v-if="t.album" class="meta-dot">·</span>
-              <span v-if="t.album" class="track-album-name">{{ t.album }}{{ t.year ? ` (${t.year})` : '' }}</span>
+              <span class="track-artist-name">{{ (track.artist && track.artist !== 'Неизвестный исполнитель') ? track.artist : t('library.unknownArtist') }}</span>
+              <span v-if="track.album" class="meta-dot">·</span>
+              <span v-if="track.album" class="track-album-name">{{ track.album }}{{ track.year ? ` (${track.year})` : '' }}</span>
             </div>
           </div>
-          <div class="track-genre" v-if="t.genre">{{ t.genre }}</div>
-          <div class="track-duration">{{ formatDuration(t.durationSec) }}</div>
+          <div class="track-genre" v-if="track.genre">{{ track.genre }}</div>
+          <div class="track-duration">{{ formatDuration(track.durationSec) }}</div>
           <div class="track-actions">
             <button
               class="fav-btn"
-              :class="{ active: t.favourite }"
-              @click.stop="toggleFav(t)"
-              :title="t.favourite ? 'Убрать из избранного' : 'В избранное'"
+              :class="{ active: track.favourite }"
+              @click.stop="toggleFav(track)"
+              :title="track.favourite ? '❤️' : '🤍'"
             >
-              {{ t.favourite ? '❤️' : '🤍' }}
+              {{ track.favourite ? '❤️' : '🤍' }}
             </button>
-            <button class="action-btn playlist-btn" @click.stop="openAddToPlaylist(t)" title="Добавить в плейлист">📋+</button>
-            <button class="del-btn" @click.stop="deleteTrack(t)" title="Удалить трек">🗑</button>
+            <button class="action-btn playlist-btn" @click.stop="openAddToPlaylist(track)" :title="t('library.addToPlaylist')">📋+</button>
+            <button class="del-btn" @click.stop="deleteTrack(track)" :title="t('library.deleteTrack')">🗑</button>
           </div>
         </div>
       </div>

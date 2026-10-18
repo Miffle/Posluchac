@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { ref, watch } from 'vue'
 import { usePlaylistsStore, Playlist } from '../store/playlists'
+import { useI18n } from '../i18n'
 
 const props = defineProps<{
   track: any | null
@@ -11,6 +12,7 @@ const emit = defineEmits<{
 }>()
 
 const playlistsStore = usePlaylistsStore()
+const { t } = useI18n()
 const newPlaylistName = ref('')
 const addingToId = ref<number | null>(null)
 const existingPlaylistIds = ref<Set<number>>(new Set())
@@ -64,9 +66,9 @@ async function handleToggle(p: Playlist) {
       <div class="modal-header">
         <div class="header-title">
           <span class="icon">📋</span>
-          <h3>Добавить в плейлист</h3>
+          <h3>{{ t('playlists.addToPlaylistTitle') }}</h3>
         </div>
-        <button class="close-btn" @click="emit('close')" title="Закрыть">✕</button>
+        <button class="close-btn" @click="emit('close')" :title="t('common.close')">✕</button>
       </div>
 
       <div class="track-summary">
@@ -79,7 +81,7 @@ async function handleToggle(p: Playlist) {
         <input
           v-model="newPlaylistName"
           type="text"
-          placeholder="Создать новый плейлист..."
+          :placeholder="t('playlists.quickCreatePlaceholder')"
           @keyup.enter="handleCreateAndAdd"
         />
         <button
@@ -87,18 +89,18 @@ async function handleToggle(p: Playlist) {
           @click="handleCreateAndAdd"
           :disabled="!newPlaylistName.trim()"
         >
-          Создать
+          {{ t('playlists.quickCreateBtn') }}
         </button>
       </div>
 
       <!-- Playlists list -->
       <div class="playlists-list">
         <div v-if="loadingIds" class="empty-hint">
-          Проверка плейлистов...
+          {{ t('playlists.checkingPlaylists') }}
         </div>
 
         <div v-else-if="!playlistsStore.playlists.length" class="empty-hint">
-          Плейлистов пока нет. Введите название выше и создайте первый!
+          {{ t('playlists.noPlaylistsYet') }}
         </div>
 
         <div
@@ -117,14 +119,14 @@ async function handleToggle(p: Playlist) {
             :class="existingPlaylistIds.has(p.id) ? 'btn-added' : 'btn-ghost add-btn'"
           >
             <span v-if="addingToId === p.id">...</span>
-            <span v-else-if="existingPlaylistIds.has(p.id)">✓ В плейлисте</span>
-            <span v-else>+ Добавить</span>
+            <span v-else-if="existingPlaylistIds.has(p.id)">✓ {{ t('playlists.inPlaylist') }}</span>
+            <span v-else>+ {{ t('playlists.add') }}</span>
           </button>
         </div>
       </div>
 
       <div class="modal-footer">
-        <button class="btn btn-accent btn-sm" @click="emit('close')">Готово</button>
+        <button class="btn btn-accent btn-sm" @click="emit('close')">{{ t('playlists.done') }}</button>
       </div>
     </div>
   </div>
@@ -295,9 +297,6 @@ async function handleToggle(p: Playlist) {
   background: rgba(220, 53, 69, 0.15);
   color: #ff6b6b;
   border-color: rgba(220, 53, 69, 0.4);
-}
-.playlist-option:hover .btn-added::after {
-  content: ' (убрать)';
 }
 
 .modal-footer {

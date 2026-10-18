@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { useI18n } from '../i18n'
 import { CheckForUpdates, ApplyUpdate, OpenExternalURL, GetAppVersion } from '../../wailsjs/go/main/App'
 import { updater } from '../../wailsjs/go/models'
 
 export const useUpdaterStore = defineStore('updater', () => {
+  const { t } = useI18n()
   const currentVersion = ref('')
   const updateInfo = ref<updater.UpdateInfo | null>(null)
   const isChecking = ref(false)
@@ -34,12 +36,12 @@ export const useUpdaterStore = defineStore('updater', () => {
           showModal.value = true
         }
       } else if (manual) {
-        statusMessage.value = 'У вас установлена актуальная версия!'
+        statusMessage.value = t('updater.latestVersion')
         setTimeout(() => { statusMessage.value = null }, 3500)
       }
     } catch (e: any) {
       if (manual) {
-        error.value = 'Ошибка проверки: ' + (e?.message || e)
+        error.value = t('updater.checkError', { err: e?.message || e })
         setTimeout(() => { error.value = null }, 4000)
       }
     } finally {
@@ -55,7 +57,7 @@ export const useUpdaterStore = defineStore('updater', () => {
       await ApplyUpdate(updateInfo.value.downloadUrl)
     } catch (e: any) {
       isUpdating.value = false
-      error.value = 'Не удалось применить обновление: ' + (e?.message || e)
+      error.value = t('updater.applyError', { err: e?.message || e })
     }
   }
 

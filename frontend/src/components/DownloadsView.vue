@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useDownloadsStore } from '../store/downloads'
 import { usePlayerStore } from '../store/player'
 import { useDialogStore } from '../store/dialog'
+import { useI18n } from '../i18n'
 import { GetDownloadDir, OpenDownloadFolder, OpenFileInFolder } from '../../wailsjs/go/main/App'
 
 const props = defineProps<{
@@ -12,6 +13,7 @@ const props = defineProps<{
 const downloads = useDownloadsStore()
 const player = usePlayerStore()
 const dialog = useDialogStore()
+const { t } = useI18n()
 const downloadDir = ref('')
 
 watch(() => props.active, (isActive) => {
@@ -78,11 +80,11 @@ function stateColor(state: string) {
 
 function stateLabel(state: string) {
   return { 
-    downloading: '⬇ Загрузка', 
-    seeding: '🌱 Раздаёт', 
-    paused: '⏸ Остановлено', 
-    queued: '⏳ Очередь',
-    metadata: '⏳ Получение метаданных'
+    downloading: '⬇ ' + t('downloads.statusDownloading'), 
+    seeding: '🌱 ' + t('downloads.statusSeeding'), 
+    paused: '⏸ ' + t('downloads.statusPaused'), 
+    queued: '⏳ ' + t('downloads.statusQueued'),
+    metadata: '⏳ ' + t('downloads.statusMetadata')
   }[state] ?? state
 }
 async function onAddFile(infoHash: string, file: any) {
@@ -91,10 +93,10 @@ async function onAddFile(infoHash: string, file: any) {
 
 async function onDeleteFile(infoHash: string, file: any) {
   const ok = await dialog.confirm({
-    title: 'Удаление файла',
-    message: `Удалить файл «${file.name}» с диска?`,
-    details: 'Файл будет удален из папки загрузок.',
-    confirmText: 'Удалить',
+    title: t('downloads.deleteFileTitle'),
+    message: t('downloads.deleteFileMsg', { name: file.name }),
+    details: t('downloads.deleteFileDetails'),
+    confirmText: t('common.delete'),
     danger: true
   })
   if (ok) {
@@ -104,13 +106,13 @@ async function onDeleteFile(infoHash: string, file: any) {
 
 async function onDeleteTorrent(d: any) {
   const choice = await dialog.choice({
-    title: 'Удаление раздачи',
-    message: `Что сделать с раздачей «${d.name}»?`,
+    title: t('downloads.deleteTorrentTitle'),
+    message: t('downloads.deleteTorrentMsg', { name: d.name }),
     options: [
-      { label: 'Удалить вместе с файлами с диска', value: 'with_files', danger: true },
-      { label: 'Только убрать из списка (оставить файлы)', value: 'keep_files' }
+      { label: t('downloads.deleteWithFiles'), value: 'with_files', danger: true },
+      { label: t('downloads.deleteKeepFiles'), value: 'keep_files' }
     ],
-    cancelText: 'Отмена'
+    cancelText: t('common.cancel')
   })
   if (!choice) return
   await downloads.remove(d.infoHash, choice === 'with_files')
@@ -121,20 +123,20 @@ async function onDeleteTorrent(d: any) {
   <div class="downloads-view">
     <div class="view-header">
       <div>
-        <h1>Загрузки</h1>
+        <h1>{{ t('downloads.title') }}</h1>
         <div class="dl-path-hint" v-if="downloadDir" :title="downloadDir">
-          📁 Папка сохранения: <code>{{ downloadDir }}</code>
+          📁 {{ t('downloads.saveFolder') }} <code>{{ downloadDir }}</code>
         </div>
       </div>
       <button class="btn btn-accent" @click="openFolder">
-        📂 Открыть папку с музыкой
+        📂 {{ t('downloads.openFolder') }}
       </button>
     </div>
 
     <div class="empty-state" v-if="!downloads.downloads.length">
       <div class="empty-icon">⬇️</div>
-      <p>Нет активных загрузок</p>
-      <p class="empty-hint">Найдите музыку в поиске, выберите нужные песни и нажмите «Скачать»</p>
+      <p>{{ t('downloads.emptyTitle') }}</p>
+      <p class="empty-hint">{{ t('downloads.emptyHint') }}</p>
     </div>
 
     <div class="download-list" v-else>
@@ -143,10 +145,10 @@ async function onDeleteTorrent(d: any) {
           <div class="download-title-group">
             <div class="download-name" :title="d.name">{{ d.name }}</div>
             <div class="download-selected-track" v-if="d.selectedTrack" :title="d.selectedTrack">
-              🎵 Выбран трек: <span class="track-highlight">{{ d.selectedTrack }}</span>
+              🎵 {{ t('downloads.selectedTrack') }} <span class="track-highlight">{{ d.selectedTrack }}</span>
             </div>
             <div class="download-selected-track" v-else-if="d.selectedCount && d.selectedCount > 1">
-              🎵 Выбрано треков: <span class="track-highlight">{{ d.selectedCount }}</span>
+              🎵 {{ t('downloads.selectedTracks') }} <span class="track-highlight">{{ d.selectedCount }}</span>
             </div>
           </div>
           <div class="download-actions">
@@ -154,7 +156,7 @@ async function onDeleteTorrent(d: any) {
               class="ctrl"
               @click="downloads.pause(d.infoHash)"
               v-if="d.state === 'downloading' || d.state === 'seeding'"
-              :title="d.state === 'seeding' ? 'Остановить раздачу' : 'Приостановить загрузку'"
+              :title="d.state === 'seeding' ? t('downloads.stopSeeding') : t('downloads.pauseTorrent')"
             >
               ⏸
             </button>
@@ -162,15 +164,15 @@ async function onDeleteTorrent(d: any) {
               class="ctrl"
               @click="downloads.resume(d.infoHash)"
               v-if="d.state === 'paused'"
-              :title="d.percentDone >= 100 ? 'Возобновить раздачу' : 'Продолжить загрузку'"
+              :title="d.percentDone >= 100 ? t('downloads.resumeSeeding') : t('downloads.resumeTorrent')"
             >
               ▶
             </button>
-            <button class="ctrl" @click="toggleExpand(d.infoHash)" :title="expanded[d.infoHash] ? 'Свернуть файлы' : 'Показать файлы'">
+            <button class="ctrl" @click="toggleExpand(d.infoHash)" :title="expanded[d.infoHash] ? t('downloads.collapseFiles') : t('downloads.showFiles')">
               📂 {{ expanded[d.infoHash] ? '▲' : '▼' }}
             </button>
-            <button class="ctrl" @click="openFolder" title="Открыть в проводнике">📁</button>
-            <button class="ctrl danger" @click="onDeleteTorrent(d)" title="Удалить раздачу">✕</button>
+            <button class="ctrl" @click="openFolder" :title="t('downloads.showInFolder')">📁</button>
+            <button class="ctrl danger" @click="onDeleteTorrent(d)" :title="t('downloads.deleteBtn')">✕</button>
           </div>
         </div>
 
@@ -189,16 +191,16 @@ async function onDeleteTorrent(d: any) {
 
         <div class="download-meta">
           <span :style="{ color: stateColor(d.state) }" class="state-badge">{{ stateLabel(d.state) }}</span>
-          <span v-if="d.state === 'metadata'" class="meta-hint">Загрузка структуры файлов...</span>
+          <span v-if="d.state === 'metadata'" class="meta-hint">{{ t('downloads.metadataHint') }}</span>
           <span v-else>{{ formatBytes(d.downloaded) }} / {{ formatBytes(d.total) }}</span>
-          <span v-if="d.seeders > 0 || d.state !== 'metadata'">🌱 {{ d.seeders }} сидеров</span>
+          <span v-if="d.seeders > 0 || d.state !== 'metadata'">🌱 {{ d.seeders }} {{ t('downloads.seedersCount') }}</span>
           <span v-if="d.downloadSpeed > 0" class="speed-dl">⬇ {{ formatBytes(d.downloadSpeed) }}/s</span>
           <span v-if="d.uploadSpeed > 0 || d.state === 'seeding'" class="speed-ul">⬆ {{ formatBytes(d.uploadSpeed) }}/s</span>
         </div>
 
         <!-- File list (expanded) with individual download/delete actions -->
         <div class="file-list" v-if="expanded[d.infoHash]">
-          <div v-if="!downloads.files[d.infoHash]" class="loading">Загружаю список файлов...</div>
+          <div v-if="!downloads.files[d.infoHash]" class="loading">{{ t('downloads.loadingFiles') }}</div>
           <div
             v-for="f in downloads.files[d.infoHash]"
             :key="f.path"
@@ -210,24 +212,24 @@ async function onDeleteTorrent(d: any) {
 
             <!-- Status Pill -->
             <div class="file-status-wrap">
-              <span v-if="f.isComplete" class="file-status complete">✓ Скачан</span>
+              <span v-if="f.isComplete" class="file-status complete">✓ {{ t('downloads.fileDownloaded') }}</span>
               <span v-else-if="f.isSelected" class="file-status downloading">⬇ {{ (f.percentDone ?? 0).toFixed(0) }}%</span>
-              <span v-else class="file-status not-downloaded">Не скачан</span>
+              <span v-else class="file-status not-downloaded">{{ t('downloads.fileNotDownloaded') }}</span>
             </div>
 
             <!-- Actions -->
             <div class="file-actions">
               <!-- Listen (streams or plays local file) -->
-              <button class="ctrl-mini" @click="player.play(d.infoHash, f.path)" title="Слушать">▶</button>
+              <button class="ctrl-mini" @click="player.play(d.infoHash, f.path)" :title="t('common.play')">▶</button>
               
               <!-- Download if not yet complete/selected -->
               <button
                 v-if="!f.isComplete && !f.isSelected"
                 class="ctrl-mini btn-add"
                 @click="onAddFile(d.infoHash, f)"
-                title="Догрузить этот трек"
+                :title="t('downloads.downloadThisTrack')"
               >
-                ⬇ Скачать
+                ⬇ {{ t('downloads.download') }}
               </button>
 
               <!-- In explorer -->
@@ -235,7 +237,7 @@ async function onDeleteTorrent(d: any) {
                 v-if="f.isComplete"
                 class="ctrl-mini"
                 @click="openFile(d.infoHash, f.path)"
-                title="Показать в проводнике"
+                :title="t('downloads.showInFolder')"
               >
                 📁
               </button>
@@ -245,7 +247,7 @@ async function onDeleteTorrent(d: any) {
                 v-if="f.isComplete || f.isSelected"
                 class="ctrl-mini btn-del"
                 @click="onDeleteFile(d.infoHash, f)"
-                :title="f.isComplete ? 'Удалить скачанный трек с диска' : 'Отменить загрузку этого трека'"
+                :title="t('common.delete')"
               >
                 🗑
               </button>

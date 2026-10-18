@@ -11,8 +11,10 @@ import {
 import { useDownloadsStore, type TorrentFile } from '../store/downloads'
 import { usePlayerStore } from '../store/player'
 import { useDialogStore } from '../store/dialog'
+import { useI18n } from '../i18n'
 
 const navigate = inject<(view: string) => void>('navigate', () => {})
+const { t } = useI18n()
 
 interface SearchResult {
   title: string
@@ -127,7 +129,7 @@ async function addSourceHandler() {
     newSourceUrl.value = ''
     await loadSources(1)
   } catch (e: any) {
-    sourceError.value = e?.message || 'Ошибка загрузки источника'
+    sourceError.value = e?.message || t('common.error')
   } finally {
     addingSource.value = false
   }
@@ -135,9 +137,9 @@ async function addSourceHandler() {
 
 async function removeSourceHandler(id: number) {
   const ok = await dialog.confirm({
-    title: 'Удаление источника',
-    message: 'Удалить этот источник поиска?',
-    confirmText: 'Удалить',
+    title: t('search.deleteSourceConfirmTitle'),
+    message: t('search.deleteSourceConfirmMsg'),
+    confirmText: t('common.delete'),
     danger: true
   })
   if (!ok) return
@@ -167,7 +169,7 @@ async function doSearch() {
     const res = await Search(query.value.trim())
     results.value = (res || []) as SearchResult[]
   } catch (e: any) {
-    error.value = e?.message || 'Ошибка поиска'
+    error.value = e?.message || t('common.error')
   } finally {
     loading.value = false
   }
@@ -195,8 +197,8 @@ async function openFileSelector(result: SearchResult) {
   } catch (e: any) {
     showFileModal.value = false
     await dialog.alert({
-      title: 'Ошибка получения файлов',
-      message: 'Не удалось получить список файлов раздачи: ' + (e?.message || e),
+      title: t('common.error'),
+      message: (e?.message || e),
       type: 'error'
     })
   } finally {
@@ -218,10 +220,10 @@ async function addMagnetManual() {
     await downloadsStore.addMagnet(magnetUri.value.trim())
     magnetUri.value = ''
     showMagnetInput.value = false
-    dialog.toast('Торрент успешно добавлен в загрузки!', 'success')
+    dialog.toast(t('search.toastAdded'), 'success')
   } catch (e: any) {
     await dialog.alert({
-      title: 'Ошибка добавления торрента',
+      title: t('common.error'),
       message: e?.message || String(e),
       type: 'error'
     })
@@ -269,7 +271,7 @@ const folderGroups = computed<FolderGroup[]>(() => {
 
     let displayName = folderKey
     if (folderKey === '') {
-      displayName = 'Файлы раздачи'
+      displayName = t('search.folderFiles')
     } else if (rootPrefix.value && folderKey.startsWith(rootPrefix.value.slice(0, -1))) {
       const rel = folderKey.substring(rootPrefix.value.length)
       displayName = rel || rootPrefix.value.slice(0, -1)
@@ -433,7 +435,7 @@ async function confirmDownloadSelected() {
   )
 
   if (chosenPaths.size === 0) {
-    dialog.toast('Выберите хотя бы один файл для скачивания', 'warning')
+    dialog.toast(t('search.toastSelectWarning'), 'warning')
     return
   }
 
@@ -450,7 +452,7 @@ async function confirmDownloadSelected() {
   const paths = Array.from(chosenPaths)
   const hash = pendingInfoHash.value
   if (!hash) {
-    dialog.toast('Ошибка: хэш торрента не найден', 'error')
+    dialog.toast(t('common.error'), 'error')
     return
   }
 
@@ -458,10 +460,10 @@ async function confirmDownloadSelected() {
     pendingInfoHash.value = ''
     showFileModal.value = false
     await downloadsStore.downloadSelectedFiles(hash, paths)
-    dialog.toast(`Загрузка начата! Выбрано файлов: ${paths.length}`, 'success')
+    dialog.toast(`${t('search.toastStarted')} ${paths.length}`, 'success')
   } catch (e: any) {
     await dialog.alert({
-      title: 'Ошибка запуска загрузки',
+      title: t('common.error'),
       message: e?.message || String(e),
       type: 'error'
     })
@@ -471,7 +473,7 @@ async function confirmDownloadSelected() {
 async function confirmDownloadAll() {
   const hash = pendingInfoHash.value
   if (!hash) {
-    dialog.toast('Ошибка: хэш торрента не найден', 'error')
+    dialog.toast(t('common.error'), 'error')
     return
   }
 
@@ -479,10 +481,10 @@ async function confirmDownloadAll() {
     pendingInfoHash.value = ''
     showFileModal.value = false
     await downloadsStore.downloadSelectedFiles(hash, [])
-    dialog.toast('Загрузка всех файлов раздачи начата!', 'success')
+    dialog.toast(t('search.toastAllStarted'), 'success')
   } catch (e: any) {
     await dialog.alert({
-      title: 'Ошибка запуска загрузки',
+      title: t('common.error'),
       message: e?.message || String(e),
       type: 'error'
     })
@@ -494,13 +496,13 @@ const streamingPath = ref('')
 async function streamTrack(file: TorrentFile) {
   if (streamingPath.value) return
   streamingPath.value = file.path
-  dialog.toast('Подключение к раздаче и буферизация трека...', 'info')
+  dialog.toast(t('search.toastBufferingTrack'), 'info')
   try {
     await PlayTrack(pendingInfoHash.value, file.path)
-    dialog.toast(`Играет: ${file.name}`, 'success')
+    dialog.toast(`${t('search.toastNowPlaying')} ${file.name}`, 'success')
   } catch (e: any) {
     await dialog.alert({
-      title: 'Ошибка воспроизведения',
+      title: t('common.error'),
       message: e?.message || String(e),
       type: 'error'
     })
@@ -532,15 +534,15 @@ function sourceBadgeClass(source: string) {
 <template>
   <div class="search-view">
     <div class="view-header">
-      <h1>Поиск музыки</h1>
+      <h1>{{ t('search.title') }}</h1>
       <div class="header-actions">
         <button class="btn btn-ghost" @click="showMagnetInput = !showMagnetInput">🔗 Magnet</button>
         <button
           class="btn btn-accent"
           @click="openSourcesModal"
-          title="Управление JSON источниками загрузок"
+          :title="t('search.sourcesModalTitle')"
         >
-          📦 Источники ({{ sourcesList.length }})
+          📦 {{ t('search.sourcesBtn') }} ({{ sourcesList.length }})
         </button>
       </div>
     </div>
@@ -550,11 +552,11 @@ function sourceBadgeClass(source: string) {
       <input
         v-model="magnetUri"
         type="text"
-        placeholder="magnet:?xt=urn:btih:..."
+        :placeholder="t('search.magnetPlaceholder')"
         class="magnet-input"
         @keyup.enter="addMagnetManual"
       />
-      <button class="btn btn-accent" @click="addMagnetManual">Добавить</button>
+      <button class="btn btn-accent" @click="addMagnetManual">{{ t('search.addMagnetBtn') }}</button>
     </div>
 
     <!-- Search bar -->
@@ -562,12 +564,12 @@ function sourceBadgeClass(source: string) {
       <input
         v-model="query"
         type="text"
-        placeholder="Исполнитель, альбом, дискография, трек..."
+        :placeholder="t('search.placeholder')"
         class="search-input"
         @keyup.enter="doSearch"
       />
       <button class="btn btn-accent search-btn" @click="doSearch" :disabled="loading">
-        {{ loading ? 'Ищу...' : '🔍 Найти' }}
+        {{ loading ? t('search.searching') : '🔍 ' + t('search.searchBtn') }}
       </button>
     </div>
 
@@ -575,27 +577,27 @@ function sourceBadgeClass(source: string) {
 
     <!-- Results -->
     <div class="results" v-if="results.length">
-      <div class="results-count">Найдено раздач: {{ results.length }}</div>
+      <div class="results-count">{{ t('search.resultsCount') }}: {{ results.length }}</div>
       <div class="result-item" v-for="(r, i) in results" :key="i">
         <div class="result-main">
           <span :class="['badge', sourceBadgeClass(r.source)]">{{ sourceLabel(r.source) }}</span>
           <div class="result-title" :title="r.title">{{ r.title }}</div>
         </div>
         <div class="result-meta">
-          <span class="meta-item seeders" title="Сидеры">🌱 {{ r.seeders }}</span>
-          <span class="meta-item leechers" title="Личеры" v-if="r.leechers > 0">⬇ {{ r.leechers }}</span>
-          <span class="meta-item size" title="Размер">{{ r.size }}</span>
+          <span class="meta-item seeders" :title="t('search.seeders')">🌱 {{ r.seeders }}</span>
+          <span class="meta-item leechers" :title="t('search.leechers')" v-if="r.leechers > 0">⬇ {{ r.leechers }}</span>
+          <span class="meta-item size" :title="t('search.size')">{{ r.size }}</span>
         </div>
         <button class="btn btn-accent btn-sm" @click="openFileSelector(r)">
-          📂 Выбрать файлы / Скачать
+          📂 {{ t('search.chooseFilesBtn') }}
         </button>
       </div>
     </div>
 
     <div class="empty-state" v-else-if="!loading">
       <div class="empty-icon">🎵</div>
-      <p>Ищите музыку по добавленным источникам (Hydra-style) и торрент-трекерам</p>
-      <p class="empty-hint">Нажмите «📦 Источники», чтобы добавить ссылки на каталоги раздач</p>
+      <p>{{ t('search.emptyTitle') }}</p>
+      <p class="empty-hint">{{ t('search.emptyHint') }}</p>
     </div>
 
     <!-- Sources Manager Modal (Hydra style) -->
@@ -604,9 +606,9 @@ function sourceBadgeClass(source: string) {
         <div class="modal sources-modal">
           <div class="modal-header">
             <div>
-              <h2>📦 Источники загрузки (JSON)</h2>
+              <h2>📦 {{ t('search.sourcesModalTitle') }}</h2>
               <p class="modal-hint">
-                Добавляйте ссылки на JSON-источники (например, GitHub Raw). Раздачи индексируются в базе и доступны в мгновенном поиске.
+                {{ t('search.sourcesModalDesc') }}
               </p>
             </div>
             <button class="close-btn" @click="showSourcesModal = false">✕</button>
@@ -617,12 +619,12 @@ function sourceBadgeClass(source: string) {
             <input
               v-model="newSourceUrl"
               type="text"
-              placeholder="https://raw.githubusercontent.com/.../rutracker.json"
+              :placeholder="t('search.sourceUrlPlaceholder')"
               class="source-input"
               @keyup.enter="addSourceHandler"
             />
             <button class="btn btn-accent" @click="addSourceHandler" :disabled="addingSource">
-              {{ addingSource ? 'Индексация...' : '+ Добавить' }}
+              {{ addingSource ? t('search.addingSource') : '+ ' + t('search.addSourceBtn') }}
             </button>
           </div>
 
@@ -631,19 +633,19 @@ function sourceBadgeClass(source: string) {
           <!-- List of Sources -->
           <div class="sources-list-container">
             <div class="sources-header-bar">
-              <span class="sources-title-label">Подключенные каталоги ({{ sourcesList.length }})</span>
+              <span class="sources-title-label">{{ t('search.connectedSources') }} ({{ sourcesList.length }})</span>
               <button
                 class="btn btn-ghost btn-xs"
                 @click="syncSourcesHandler"
                 :disabled="addingSource || sourcesList.length === 0"
               >
-                🔄 Обновить все
+                🔄 {{ t('search.syncAllBtn') }}
               </button>
             </div>
 
             <div v-if="sourcesList.length === 0" class="empty-sources">
-              <p>Нет добавленных источников.</p>
-              <p class="sub">Вставьте ссылку на JSON со списком раздач выше.</p>
+              <p>{{ t('search.noSources') }}</p>
+              <p class="sub">{{ t('search.noSourcesSub') }}</p>
             </div>
 
             <div v-else class="sources-items">
@@ -651,12 +653,12 @@ function sourceBadgeClass(source: string) {
                 <div class="source-info">
                   <div class="source-name">
                     <b>{{ s.name }}</b>
-                    <span class="source-count">({{ s.itemCount }} раздач)</span>
+                    <span class="source-count">({{ s.itemCount }} {{ t('search.releases') }})</span>
                   </div>
                   <div class="source-url" :title="s.url">{{ s.url }}</div>
                 </div>
                 <div class="source-actions">
-                  <button class="ctrl-btn-del" @click="removeSourceHandler(s.id)" title="Удалить источник">
+                  <button class="ctrl-btn-del" @click="removeSourceHandler(s.id)" :title="t('common.delete')">
                     ✕
                   </button>
                 </div>
@@ -673,7 +675,7 @@ function sourceBadgeClass(source: string) {
         <div class="modal file-picker-modal">
           <div class="modal-header">
             <div class="file-modal-titles">
-              <h2>Выбор файлов из раздачи</h2>
+              <h2>{{ t('search.filePickerTitle') }}</h2>
               <div class="torrent-name-preview" :title="pendingTitle">{{ pendingTitle }}</div>
             </div>
             <button class="close-btn" @click="closeFilePicker">✕</button>
@@ -682,8 +684,8 @@ function sourceBadgeClass(source: string) {
           <!-- Loading state -->
           <div class="file-modal-loading" v-if="loadingFiles">
             <div class="spinner">⏳</div>
-            <p>Получение списка файлов и метаданных торрента...</p>
-            <p class="empty-hint">Пожалуйста, подождите несколько секунд</p>
+            <p>{{ t('search.filePickerLoading') }}</p>
+            <p class="empty-hint">{{ t('search.filePickerLoadingHint') }}</p>
           </div>
 
           <!-- File list state -->
@@ -692,18 +694,18 @@ function sourceBadgeClass(source: string) {
               <input
                 v-model="fileSearch"
                 type="text"
-                placeholder="Фильтр по названию трека / альбому..."
+                :placeholder="t('search.fileSearchPlaceholder')"
                 class="file-search-input"
               />
               <label class="filter-checkbox">
                 <input type="checkbox" v-model="audioOnlyFilter" />
-                <span>Только аудио</span>
+                <span>{{ t('search.audioOnly') }}</span>
               </label>
               <div class="quick-select-actions">
-                <button class="btn btn-ghost btn-xs" @click="selectAllFiltered">Выбрать все</button>
-                <button class="btn btn-ghost btn-xs" @click="deselectAll">Снять все</button>
-                <button class="btn btn-ghost btn-xs" @click="expandAllFolders" title="Развернуть все альбомы">Развернуть все</button>
-                <button class="btn btn-ghost btn-xs" @click="collapseAllFolders" title="Свернуть все альбомы">Свернуть все</button>
+                <button class="btn btn-ghost btn-xs" @click="selectAllFiltered">{{ t('search.selectAll') }}</button>
+                <button class="btn btn-ghost btn-xs" @click="deselectAll">{{ t('search.deselectAll') }}</button>
+                <button class="btn btn-ghost btn-xs" @click="expandAllFolders" :title="t('search.expandAll')">{{ t('search.expandAll') }}</button>
+                <button class="btn btn-ghost btn-xs" @click="collapseAllFolders" :title="t('search.collapseAll')">{{ t('search.collapseAll') }}</button>
               </div>
             </div>
 
@@ -740,12 +742,12 @@ function sourceBadgeClass(source: string) {
                     <span
                       v-if="group.hasCover"
                       class="cover-badge"
-                      :title="'Обложка ' + group.coverName + ' скачается автоматически вместе с выбранными треками'"
+                      :title="t('search.coverAutoHint')"
                     >
-                      🖼️ Обложка (авто)
+                      🖼️ {{ t('search.coverAutoLabel') }}
                     </span>
 
-                    <span class="folder-count">{{ group.files.length }} треков</span>
+                    <span class="folder-count">{{ group.files.length }} {{ t('search.tracksInFolder') }}</span>
                     <span class="folder-size">{{ formatBytes(group.totalSize) }}</span>
 
                     <span
@@ -785,36 +787,36 @@ function sourceBadgeClass(source: string) {
                       :class="{ 'stream-btn-loading': streamingPath === f.path }"
                       :disabled="streamingPath !== ''"
                       @click="streamTrack(f)"
-                      title="Слушать онлайн прямо сейчас"
+                      :title="t('search.listenDirectly')"
                     >
-                      <span v-if="streamingPath === f.path">⏳ Буферизация...</span>
-                      <span v-else>▶ Слушать</span>
+                      <span v-if="streamingPath === f.path">⏳ {{ t('search.buffering') }}</span>
+                      <span v-else>▶ {{ t('search.listenBtn') }}</span>
                     </button>
                   </div>
                 </div>
               </div>
 
               <div class="empty-file-filter" v-if="folderGroups.length === 0">
-                Файлы не найдены по запросу
+                {{ t('search.noAudioFound') }}
               </div>
             </div>
 
             <!-- Modal Footer -->
             <div class="file-modal-footer">
               <div class="footer-stats">
-                <b>Выбрано треков:</b> {{ selectedCount }} из {{ totalAudioFilesCount }}
-                <span class="footer-size">({{ selectedSize }} из {{ totalFilesSize }})</span>
-                <span class="footer-cover-hint">🖼️ Обложки скачиваются автоматически</span>
+                <b>{{ t('search.selectedTracksCount') }}</b> {{ selectedCount }} {{ t('search.fromTotal') }} {{ totalAudioFilesCount }}
+                <span class="footer-size">({{ selectedSize }} {{ t('search.fromTotal') }} {{ totalFilesSize }})</span>
+                <span class="footer-cover-hint">🖼️ {{ t('search.coverAutoHint') }}</span>
               </div>
               <div class="footer-actions">
-                <button class="btn btn-ghost" @click="closeFilePicker">Отмена</button>
-                <button class="btn btn-ghost" @click="confirmDownloadAll">Скачать всё</button>
+                <button class="btn btn-ghost" @click="closeFilePicker">{{ t('search.cancelBtn') }}</button>
+                <button class="btn btn-ghost" @click="confirmDownloadAll">{{ t('search.downloadAllBtn') }}</button>
                 <button
                   class="btn btn-accent"
                   :disabled="selectedCount === 0"
                   @click="confirmDownloadSelected"
                 >
-                  ⬇ Скачать выбранные ({{ selectedCount }})
+                  ⬇ {{ t('search.downloadSelectedBtn') }} ({{ selectedCount }})
                 </button>
               </div>
             </div>

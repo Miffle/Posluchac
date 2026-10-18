@@ -1,24 +1,26 @@
 <script lang="ts" setup>
 import { useDialogStore } from '../store/dialog'
+import { useI18n } from '../i18n'
 
 const dialog = useDialogStore()
+const { t } = useI18n()
 </script>
 
 <template>
   <div class="toast-container" v-if="dialog.toasts.length">
     <transition-group name="toast-anim">
       <div
-        v-for="t in dialog.toasts"
-        :key="t.id"
+        v-for="toast in dialog.toasts"
+        :key="toast.id"
         class="toast-card"
-        :class="t.type"
-        @click="dialog.removeToast(t.id)"
-        title="Нажмите, чтобы скрыть"
+        :class="toast.type"
+        @click="dialog.removeToast(toast.id)"
+        :title="t('common.close')"
       >
         <span class="toast-icon">
-          {{ t.type === 'success' ? '✅' : t.type === 'error' ? '⚠️' : t.type === 'warning' ? '🔔' : 'ℹ️' }}
+          {{ toast.type === 'success' ? '✅' : toast.type === 'error' ? '⚠️' : toast.type === 'warning' ? '🔔' : 'ℹ️' }}
         </span>
-        <span class="toast-text">{{ t.message }}</span>
+        <span class="toast-text">{{ toast.message }}</span>
       </div>
     </transition-group>
   </div>

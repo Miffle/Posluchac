@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { GetLibrary } from '../../wailsjs/go/main/App'
 import { usePlaylistsStore, Playlist } from '../store/playlists'
+import { useI18n } from '../i18n'
 
 const props = defineProps<{
   playlist: Playlist | null
@@ -12,6 +13,7 @@ const emit = defineEmits<{
 }>()
 
 const playlistsStore = usePlaylistsStore()
+const { t } = useI18n()
 const allTracks = ref<any[]>([])
 const search = ref('')
 const addedTrackIds = ref<Set<number>>(new Set())
@@ -61,23 +63,23 @@ function formatDuration(sec: number) {
       <div class="modal-header">
         <div class="header-title">
           <span class="icon">➕</span>
-          <h3>Добавить треки в «{{ playlist.name }}»</h3>
+          <h3>{{ t('playlists.addTracksToPlaylist', { name: playlist.name }) }}</h3>
         </div>
-        <button class="close-btn" @click="emit('close')" title="Закрыть">✕</button>
+        <button class="close-btn" @click="emit('close')" :title="t('common.close')">✕</button>
       </div>
 
       <div class="search-box">
         <input
           v-model="search"
           type="text"
-          placeholder="Поиск по названию, исполнителю, альбому..."
+          :placeholder="t('playlists.searchTracksPlaceholder')"
           autofocus
         />
       </div>
 
       <div class="tracks-list">
         <div v-if="!filteredTracks.length" class="empty-hint">
-          {{ search ? 'Ничего не найдено' : 'В библиотеке пока нет скачанных треков' }}
+          {{ search ? t('playlists.noTracksFound') : t('playlists.noLibraryTracks') }}
         </div>
 
         <div
@@ -87,7 +89,7 @@ function formatDuration(sec: number) {
         >
           <div class="track-meta">
             <div class="title">{{ t.title || t.fileName }}</div>
-            <div class="artist">{{ t.artist || 'Неизвестный исполнитель' }}</div>
+            <div class="artist">{{ t.artist || t('library.unknownArtist') }}</div>
           </div>
           <div class="duration">{{ formatDuration(t.durationSec) }}</div>
           <button
@@ -96,13 +98,13 @@ function formatDuration(sec: number) {
             @click="add(t)"
             :disabled="addedTrackIds.has(t.id)"
           >
-            {{ addedTrackIds.has(t.id) ? '✓ В плейлисте' : '+ Добавить' }}
+            {{ addedTrackIds.has(t.id) ? '✓ ' + t('playlists.inPlaylist') : '+ ' + t('playlists.add') }}
           </button>
         </div>
       </div>
 
       <div class="modal-footer">
-        <button class="btn btn-ghost" @click="emit('close')">Готово</button>
+        <button class="btn btn-ghost" @click="emit('close')">{{ t('playlists.done') }}</button>
       </div>
     </div>
   </div>

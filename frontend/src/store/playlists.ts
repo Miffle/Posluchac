@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { useI18n } from '../i18n'
 import {
   ListPlaylists,
   CreatePlaylist,
@@ -31,6 +32,7 @@ export interface PlaylistTrack {
 }
 
 export const usePlaylistsStore = defineStore('playlists', () => {
+  const { t } = useI18n()
   const playlists = ref<Playlist[]>([])
   const selected = ref<Playlist | null>(null)
   const tracks = ref<PlaylistTrack[]>([])
@@ -59,7 +61,7 @@ export const usePlaylistsStore = defineStore('playlists', () => {
     if (!trimmed) return 0
     const id = await CreatePlaylist(trimmed)
     await loadPlaylists()
-    showToast(`Плейлист «${trimmed}» создан`)
+    showToast(t('playlists.toastCreatedWithName', { name: trimmed }))
     return id
   }
 
@@ -92,8 +94,8 @@ export const usePlaylistsStore = defineStore('playlists', () => {
     if (selected.value?.id === playlistId) {
       await refreshSelectedTracks()
     }
-    const name = playlistName || playlists.value.find(p => p.id === playlistId)?.name || 'плейлист'
-    showToast(`Трек добавлен в «${name}»`)
+    const name = playlistName || playlists.value.find(p => p.id === playlistId)?.name || ''
+    showToast(t('playlists.toastAdded', { name }))
   }
 
   async function removeTrack(playlistId: number, trackId: number, playlistName?: string) {
@@ -101,8 +103,8 @@ export const usePlaylistsStore = defineStore('playlists', () => {
     if (selected.value?.id === playlistId) {
       await refreshSelectedTracks()
     }
-    const name = playlistName || playlists.value.find(p => p.id === playlistId)?.name || 'плейлист'
-    showToast(`Трек убран из «${name}»`)
+    const name = playlistName || playlists.value.find(p => p.id === playlistId)?.name || ''
+    showToast(t('playlists.toastRemoved', { name }))
   }
 
   async function getPlaylistsForTrack(trackId: number): Promise<number[]> {

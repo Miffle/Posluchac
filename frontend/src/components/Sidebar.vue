@@ -46,11 +46,11 @@ const items = computed<{ id: View; label: string; icon: string }[]>(() => [
         class="update-banner"
         v-if="updater.updateInfo?.hasUpdate"
         @click="updater.showModal = true"
-        title="Нажмите, чтобы посмотреть список изменений и обновиться"
+        :title="t('nav.checkUpdates')"
       >
         <span class="banner-pulse"></span>
         <div class="banner-text">
-          <div class="banner-title">Новая версия!</div>
+          <div class="banner-title">{{ t('nav.newVersion') }}</div>
           <div class="banner-ver">v{{ updater.updateInfo.latestVersion }}</div>
         </div>
         <span class="banner-arrow">➔</span>
@@ -62,7 +62,7 @@ const items = computed<{ id: View; label: string; icon: string }[]>(() => [
           class="check-btn"
           @click="updater.check(true)"
           :disabled="updater.isChecking"
-          title="Проверить наличие обновлений"
+          :title="t('nav.checkUpdates')"
         >
           <span :class="['check-icon', { spinning: updater.isChecking }]">🔄</span>
         </button>

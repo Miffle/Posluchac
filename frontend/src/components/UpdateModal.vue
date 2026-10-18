@@ -1,12 +1,14 @@
 <script lang="ts" setup>
 import { useUpdaterStore } from '../store/updater'
+import { useI18n } from '../i18n'
 
 const updater = useUpdaterStore()
+const { t } = useI18n()
 
 function formatSize(bytes: number): string {
   if (!bytes) return ''
   const mb = bytes / (1024 * 1024)
-  return `${mb.toFixed(1)} МБ`
+  return `${mb.toFixed(1)} MB`
 }
 </script>
 
@@ -16,12 +18,12 @@ function formatSize(bytes: number): string {
       <div class="modal-header">
         <div class="header-icon">🚀</div>
         <div class="header-text">
-          <h3>Доступно обновление</h3>
+          <h3>{{ t('updater.title') }}</h3>
           <div class="version-badge-row">
             <span class="ver-curr">v{{ updater.currentVersion }}</span>
             <span class="ver-arrow">➔</span>
             <span class="ver-new">v{{ updater.updateInfo?.latestVersion }}</span>
-            <span class="pub-date" v-if="updater.updateInfo?.publishedAt">от {{ updater.updateInfo.publishedAt }}</span>
+            <span class="pub-date" v-if="updater.updateInfo?.publishedAt">{{ t('updater.from') }} {{ updater.updateInfo.publishedAt }}</span>
           </div>
         </div>
         <button class="close-btn" @click="updater.showModal = false" :disabled="updater.isUpdating">✕</button>
@@ -33,17 +35,17 @@ function formatSize(bytes: number): string {
         </div>
 
         <div class="changelog-box" v-if="updater.updateInfo?.releaseNotes">
-          <div class="changelog-label">Что нового:</div>
+          <div class="changelog-label">{{ t('updater.whatsNew') }}</div>
           <pre class="changelog-text">{{ updater.updateInfo.releaseNotes }}</pre>
         </div>
 
         <div class="download-size" v-if="updater.updateInfo?.assetSize">
-          Размер загрузки: {{ formatSize(updater.updateInfo.assetSize) }}
+          {{ t('updater.downloadSize') }} {{ formatSize(updater.updateInfo.assetSize) }}
         </div>
 
         <div class="updating-progress" v-if="updater.isUpdating">
           <div class="spinner"></div>
-          <p>Скачивание обновления и замена файлов...<br/>Приложение сейчас автоматически перезапустится.</p>
+          <p style="white-space: pre-line;">{{ t('updater.downloadingAndRestart') }}</p>
         </div>
 
         <div class="alert-error" v-if="updater.error">
@@ -53,15 +55,15 @@ function formatSize(bytes: number): string {
 
       <div class="modal-footer">
         <button class="btn btn-ghost" @click="updater.openRelease()" :disabled="updater.isUpdating">
-          🌐 Страница на GitHub
+          🌐 {{ t('updater.githubPage') }}
         </button>
         <div class="footer-right">
           <button class="btn btn-ghost" @click="updater.showModal = false" :disabled="updater.isUpdating">
-            Позже
+            {{ t('updater.later') }}
           </button>
           <button class="btn btn-accent btn-update" @click="updater.apply()" :disabled="updater.isUpdating">
-            <span v-if="updater.isUpdating">Обновление...</span>
-            <span v-else>🔄 Обновить сейчас</span>
+            <span v-if="updater.isUpdating">{{ t('updater.updating') }}</span>
+            <span v-else>🔄 {{ t('updater.updateNow') }}</span>
           </button>
         </div>
       </div>

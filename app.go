@@ -842,9 +842,7 @@ func parseSmartAudioInfo(downloadDir, fullPath string, tags *metadata.Tags) (art
 		}
 	}
 
-	if artist == "" {
-		artist = "Неизвестный исполнитель"
-	}
+	// Leave artist empty if unknown so frontend can localize Unknown Artist
 	return
 }
 

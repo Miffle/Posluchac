@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { onMounted } from 'vue'
+import { onMounted, computed } from 'vue'
 import { useSettingsStore, type Language } from '../store/settings'
 import { useUpdaterStore } from '../store/updater'
 import { useI18n } from '../i18n'
@@ -13,10 +13,10 @@ onMounted(() => {
   settings.loadDownloadDir()
 })
 
-const languages: { id: Language; flag: string; name: string; nativeName: string }[] = [
-  { id: 'ru', flag: '🇷🇺', name: 'Русский', nativeName: 'Russian' },
-  { id: 'en', flag: '🇬🇧', name: 'English', nativeName: 'English' },
-]
+const languages = computed<{ id: Language; flag: string; name: string; nativeName: string }[]>(() => [
+  { id: 'ru', flag: '🇷🇺', name: t('settings.ru'), nativeName: t('settings.ruNative') },
+  { id: 'en', flag: '🇬🇧', name: t('settings.en'), nativeName: t('settings.enNative') },
+])
 
 function openGithub() {
   OpenExternalURL('https://github.com/Miffle/Posluchac')
@@ -79,9 +79,9 @@ function openGithub() {
         </div>
 
         <div class="storage-row">
-          <div class="path-display" :title="settings.downloadDir || 'Загрузка...'">
+          <div class="path-display" :title="settings.downloadDir || t('common.loading')">
             <span class="path-icon">📂</span>
-            <span class="path-text">{{ settings.downloadDir || 'Загрузка пути...' }}</span>
+            <span class="path-text">{{ settings.downloadDir || t('common.loading') }}</span>
           </div>
           <button class="action-btn" @click="settings.openFolder">
             <span>{{ t('settings.openFolder') }}</span>

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { useI18n } from '../i18n'
 
 export interface ConfirmOptions {
   title?: string
@@ -39,6 +40,8 @@ export interface ToastItem {
 }
 
 export const useDialogStore = defineStore('dialog', () => {
+  const { t } = useI18n()
+
   // Confirm state
   const isConfirmOpen = ref(false)
   const confirmData = ref<ConfirmOptions>({ message: '' })
@@ -60,11 +63,11 @@ export const useDialogStore = defineStore('dialog', () => {
 
   function confirm(opts: ConfirmOptions): Promise<boolean> {
     confirmData.value = {
-      title: opts.title || 'Подтверждение',
+      title: opts.title || t('modals.confirm'),
       message: opts.message,
       details: opts.details,
-      confirmText: opts.confirmText || 'Подтвердить',
-      cancelText: opts.cancelText || 'Отмена',
+      confirmText: opts.confirmText || t('modals.confirm'),
+      cancelText: opts.cancelText || t('modals.cancel'),
       danger: opts.danger ?? false
     }
     isConfirmOpen.value = true
@@ -83,11 +86,11 @@ export const useDialogStore = defineStore('dialog', () => {
 
   function choice(opts: ChoiceOptions): Promise<string | null> {
     choiceData.value = {
-      title: opts.title || 'Выберите действие',
+      title: opts.title || t('modals.chooseAction'),
       message: opts.message,
       details: opts.details,
       options: opts.options,
-      cancelText: opts.cancelText || 'Отмена'
+      cancelText: opts.cancelText || t('modals.cancel')
     }
     isChoiceOpen.value = true
     return new Promise<string | null>((resolve) => {
@@ -105,10 +108,10 @@ export const useDialogStore = defineStore('dialog', () => {
 
   function alert(opts: AlertOptions): Promise<void> {
     alertData.value = {
-      title: opts.title || (opts.type === 'error' ? 'Ошибка' : 'Информация'),
+      title: opts.title || (opts.type === 'error' ? t('common.error') : t('modals.info')),
       message: opts.message,
       type: opts.type || 'info',
-      buttonText: opts.buttonText || 'Понятно'
+      buttonText: opts.buttonText || t('modals.ok')
     }
     isAlertOpen.value = true
     return new Promise<void>((resolve) => {

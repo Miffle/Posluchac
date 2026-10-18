@@ -3,11 +3,13 @@ import { ref, onMounted } from 'vue'
 import { usePlaylistsStore, Playlist, PlaylistTrack } from '../store/playlists'
 import { usePlayerStore } from '../store/player'
 import { useDialogStore } from '../store/dialog'
+import { useI18n } from '../i18n'
 import PlaylistAddTracksModal from './PlaylistAddTracksModal.vue'
 
 const playlistsStore = usePlaylistsStore()
 const player = usePlayerStore()
 const dialog = useDialogStore()
+const { t } = useI18n()
 const newName = ref('')
 const showAddModal = ref(false)
 
@@ -19,10 +21,10 @@ async function createPlaylist() {
 
 async function deletePlaylist(id: number) {
   const ok = await dialog.confirm({
-    title: 'Удаление плейлиста',
-    message: 'Вы уверены, что хотите удалить этот плейлист?',
-    details: 'Треки останутся в вашей библиотеке и на диске.',
-    confirmText: 'Удалить плейлист',
+    title: t('playlists.deleteConfirmTitle'),
+    message: t('playlists.deleteConfirmMsg'),
+    details: t('playlists.deleteConfirmDetails'),
+    confirmText: t('playlists.deletePlaylistBtn'),
     danger: true
   })
   if (!ok) return
@@ -69,7 +71,7 @@ onMounted(() => {
 <template>
   <div class="playlist-view">
     <div class="view-header-row">
-      <h1>Плейлисты</h1>
+      <h1>{{ t('playlists.title') }}</h1>
       <div class="toast-pill" v-if="playlistsStore.toastMessage">
         {{ playlistsStore.toastMessage }}
       </div>
@@ -82,10 +84,10 @@ onMounted(() => {
           <input
             v-model="newName"
             type="text"
-            placeholder="Новый плейлист..."
+            :placeholder="t('playlists.namePlaceholder')"
             @keyup.enter="createPlaylist"
           />
-          <button class="btn btn-accent" @click="createPlaylist" title="Создать">+</button>
+          <button class="btn btn-accent" @click="createPlaylist" :title="t('playlists.createBtn')">+</button>
         </div>
 
         <div class="playlist-items">
@@ -98,7 +100,7 @@ onMounted(() => {
           >
             <span class="pl-icon">📋</span>
             <span class="pl-name">{{ p.name }}</span>
-            <button class="pl-delete" @click.stop="deletePlaylist(p.id)" title="Удалить плейлист">✕</button>
+            <button class="pl-delete" @click.stop="deletePlaylist(p.id)" :title="t('playlists.deletePlaylistBtn')">✕</button>
           </div>
         </div>
       </div>
@@ -107,55 +109,55 @@ onMounted(() => {
       <div class="track-panel">
         <div v-if="!playlistsStore.selected" class="empty-state">
           <div class="empty-icon">📋</div>
-          <p>Выберите плейлист слева</p>
-          <p class="empty-hint">Или создайте новый, чтобы собрать любимые треки</p>
+          <p>{{ t('playlists.selectPlaylistHint') }}</p>
+          <p class="empty-hint">{{ t('playlists.selectPlaylistSub') }}</p>
         </div>
 
         <template v-else>
           <div class="track-panel-header">
             <div class="header-titles">
               <h2>{{ playlistsStore.selected.name }}</h2>
-              <span class="track-count">{{ playlistsStore.tracks.length }} треков</span>
+              <span class="track-count">{{ playlistsStore.tracks.length }} {{ t('playlists.trackCount') }}</span>
             </div>
             <button class="btn btn-accent btn-sm" @click="showAddModal = true">
-              ➕ Добавить треки
+              ➕ {{ t('playlists.addTracksBtn') }}
             </button>
           </div>
 
           <div v-if="!playlistsStore.tracks.length" class="empty-state">
-            <p class="empty-hint">Плейлист пока пуст.</p>
+            <p class="empty-hint">{{ t('playlists.emptyPlaylist') }}</p>
             <button class="btn btn-accent btn-sm btn-empty-add" @click="showAddModal = true">
-              ➕ Добавить треки из библиотеки
+              ➕ {{ t('playlists.addFromLibrary') }}
             </button>
           </div>
 
           <div class="track-list" v-else>
             <div
-              v-for="(t, idx) in playlistsStore.tracks"
-              :key="t.id"
+              v-for="(track, idx) in playlistsStore.tracks"
+              :key="track.id"
               class="track-row"
-              @dblclick="handlePlayClick(t)"
-              :class="{ playing: isTrackActive(t) }"
+              @dblclick="handlePlayClick(track)"
+              :class="{ playing: isTrackActive(track) }"
             >
               <span class="track-num">{{ idx + 1 }}</span>
               <div class="track-info">
-                <div class="track-title">{{ t.title || t.fileName }}</div>
-                <div class="track-artist" v-if="t.artist">{{ t.artist }}</div>
+                <div class="track-title">{{ track.title || track.fileName }}</div>
+                <div class="track-artist" v-if="track.artist">{{ track.artist }}</div>
               </div>
-              <div class="track-duration">{{ formatDuration(t.durationSec) }}</div>
+              <div class="track-duration">{{ formatDuration(track.durationSec) }}</div>
               <div class="track-actions">
                 <button
                   class="play-btn"
-                  :class="{ 'is-playing': isTrackPlaying(t) }"
-                  @click.stop="handlePlayClick(t)"
-                  :title="isTrackPlaying(t) ? 'Пауза' : 'Воспроизвести'"
+                  :class="{ 'is-playing': isTrackPlaying(track) }"
+                  @click.stop="handlePlayClick(track)"
+                  :title="isTrackPlaying(track) ? t('common.pause') : t('common.play')"
                 >
-                  {{ isTrackPlaying(t) ? '⏸' : '▶' }}
+                  {{ isTrackPlaying(track) ? '⏸' : '▶' }}
                 </button>
                 <button
                   class="del-btn"
-                  @click.stop="playlistsStore.removeTrack(playlistsStore.selected.id, t.id)"
-                  title="Убрать из плейлиста"
+                  @click.stop="playlistsStore.removeTrack(playlistsStore.selected.id, track.id)"
+                  :title="t('playlists.removeFromPlaylist')"
                 >
                   ✕
                 </button>

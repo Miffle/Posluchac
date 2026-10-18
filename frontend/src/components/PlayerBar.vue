@@ -49,7 +49,7 @@ const displayTitle = computed(() => {
   if (s.value.track?.title) return s.value.track.title
   if (player.currentQueueTrack?.title) return player.currentQueueTrack.title
   const fn = s.value.track?.fileName || player.currentQueueTrack?.fileName || ''
-  if (!fn) return 'Нет трека'
+  if (!fn) return t('player.noTrack')
   const nameWithoutExt = fn.replace(/\.[^/.]+$/, '')
   if (nameWithoutExt.includes(' - ')) {
     return nameWithoutExt.split(' - ').slice(1).join(' - ').trim()
@@ -58,8 +58,9 @@ const displayTitle = computed(() => {
 })
 
 const displayArtist = computed(() => {
-  if (s.value.track?.artist) return s.value.track.artist
-  if (player.currentQueueTrack?.artist) return player.currentQueueTrack.artist
+  const a = s.value.track?.artist || player.currentQueueTrack?.artist
+  if (a && a !== 'Неизвестный исполнитель') return a
+  if (a === 'Неизвестный исполнитель') return t('library.unknownArtist')
   const fn = s.value.track?.fileName || player.currentQueueTrack?.fileName || ''
   if (!fn) return ''
   const nameWithoutExt = fn.replace(/\.[^/.]+$/, '')
@@ -137,7 +138,7 @@ function toggleMute() {
           class="ctrl-btn"
           @click="player.playPrev()"
           :disabled="s.state === 'stopped'"
-          title="Предыдущий трек"
+          :title="t('player.prevTrack')"
         >
           ⏮
         </button>
@@ -161,7 +162,7 @@ function toggleMute() {
           class="ctrl-btn"
           @click="player.playNext()"
           :disabled="s.state === 'stopped'"
-          title="Следующий трек"
+          :title="t('player.nextTrack')"
         >
           ⏭
         </button>
@@ -208,7 +209,7 @@ function toggleMute() {
           :style="{
             background: `linear-gradient(to right, var(--accent) 0%, var(--accent) ${volumePercent}%, var(--surface2) ${volumePercent}%, var(--surface2) 100%)`
           }"
-          title="Громкость"
+          :title="t('player.volume')"
         />
       </div>
 

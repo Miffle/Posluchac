@@ -73,7 +73,7 @@ export function setupMediaIntegration() {
           try {
             navigator.mediaSession.metadata = new MediaMetadata({
               title: title || 'Posluchac',
-              artist: artist || 'Воспроизведение',
+              artist: artist || 'Posluchac',
               album: album || '',
               artwork
             })

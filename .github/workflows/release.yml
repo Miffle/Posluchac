@@ -175,30 +175,30 @@ jobs:
           # Build markdown body
           $nl = [System.Environment]::NewLine
           $body = "## 🎵 Posluchac $tag$nl$nl"
-          $body += "> Музыкальный плеер с поиском и загрузкой треков через торрент-трекеры.$nl$nl"
+          $body += "> Music player with torrent-based search, streaming preview, and library management.$nl$nl"
 
           if ($features.Count -gt 0) {
-            $body += "### ✨ Новые возможности$nl" + ($features -join $nl) + "$nl$nl"
+            $body += "### ✨ Features$nl" + ($features -join $nl) + "$nl$nl"
           }
           if ($fixes.Count -gt 0) {
-            $body += "### 🐛 Исправления$nl" + ($fixes -join $nl) + "$nl$nl"
+            $body += "### 🐛 Bug Fixes$nl" + ($fixes -join $nl) + "$nl$nl"
           }
           if ($perf.Count -gt 0) {
-            $body += "### ⚡ Производительность$nl" + ($perf -join $nl) + "$nl$nl"
+            $body += "### ⚡ Performance Improvements$nl" + ($perf -join $nl) + "$nl$nl"
           }
           if ($other.Count -gt 0) {
-            $body += "### 🔧 Прочие изменения$nl" + ($other -join $nl) + "$nl$nl"
+            $body += "### 🔧 Other Changes$nl" + ($other -join $nl) + "$nl$nl"
           }
 
           $body += "---$nl$nl"
-          $body += "### 📥 Установка$nl$nl"
-          $body += "Скачайте **Posluchac.exe** ниже и запустите — установка не нужна.$nl$nl"
-          $body += "| Файл | Описание |$nl"
+          $body += "### 📥 Installation$nl$nl"
+          $body += "Download **Posluchac.exe** below and run — standalone portable app, no installation required.$nl$nl"
+          $body += "| File | Description |$nl"
           $body += "|------|----------|$nl"
-          $body += "| ``Posluchac.exe`` | Готовый исполняемый файл (рекомендуется) |$nl"
-          $body += "| ``Posluchac-windows-amd64-$tag.zip`` | Zip-архив |$nl$nl"
+          $body += "| ``Posluchac.exe`` | Standalone executable (recommended) |$nl"
+          $body += "| ``Posluchac-windows-amd64-$tag.zip`` | Zip archive |$nl$nl"
           if ($prevTag) {
-            $body += "**Полный список изменений:** [$prevTag...$tag](https://github.com/${{ github.repository }}/compare/$prevTag...$tag)$nl"
+            $body += "**Full Changelog:** [$prevTag...$tag](https://github.com/${{ github.repository }}/compare/$prevTag...$tag)$nl"
           }
 
           $body | Out-File -FilePath "release_notes.md" -Encoding utf8
@@ -209,7 +209,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version_check.outputs.tag }}
-          name: Послушак ${{ steps.version_check.outputs.tag }}
+          name: Posluchac ${{ steps.version_check.outputs.tag }}
           body_path: release_notes.md
           draft: false
           prerelease: false

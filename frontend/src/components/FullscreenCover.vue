@@ -171,7 +171,7 @@ onUnmounted(() => {
             class="fs-btn fs-prev-btn"
             @click="player.playPrev"
             :disabled="player.playlist.length === 0"
-            title="Предыдущий трек"
+            :title="t('player.prevTrack')"
           >
             ⏮
           </button>
@@ -198,7 +198,7 @@ onUnmounted(() => {
             class="fs-btn fs-next-btn"
             @click="player.playNext"
             :disabled="player.playlist.length === 0"
-            title="Следующий трек"
+            :title="t('player.nextTrack')"
           >
             ⏭
           </button>
