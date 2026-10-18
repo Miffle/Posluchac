@@ -20,6 +20,10 @@ jobs:
   build-and-release:
     name: Build & Release Posluchac
     runs-on: windows-latest
+    outputs:
+      should_release: ${{ steps.version_check.outputs.should_release }}
+      tag: ${{ steps.version_check.outputs.tag }}
+      release_url: ${{ steps.create_release.outputs.url }}
     env:
       CGO_ENABLED: 0
 
@@ -205,6 +209,7 @@ jobs:
           Write-Host "Release notes written to release_notes.md"
 
       - name: Create GitHub Release
+        id: create_release
         if: steps.version_check.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
@@ -219,3 +224,136 @@ jobs:
             dist-release/Posluchac-windows-amd64-*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  discord:
+    name: Discord Notification
+    needs: build-and-release
+    if: needs.build-and-release.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Discord embed
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL || secrets.DISCORD_WEBHOOK }}
+          VERSION: ${{ needs.build-and-release.outputs.tag }}
+          RELEASE_URL: ${{ needs.build-and-release.outputs.release_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AVATAR: ${{ github.event.pull_request.user.avatar_url }}
+          ACTOR: ${{ github.actor }}
+          REPO: ${{ github.repository }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$WEBHOOK_URL" ]; then
+            echo "::warning::WEBHOOK_URL or DISCORD_WEBHOOK secret is not set. Skipping Discord notification."
+            exit 0
+          fi
+
+          # Fallback release URL if not set
+          if [ -z "$RELEASE_URL" ]; then
+            RELEASE_URL="https://github.com/${REPO}/releases/tag/${VERSION}"
+          fi
+
+          # Fetch release notes via GitHub CLI if PR_BODY is absent
+          RELEASE_BODY=""
+          if command -v gh >/dev/null 2>&1; then
+            RELEASE_BODY=$(gh release view "$VERSION" --repo "$REPO" --json body -q .body 2>/dev/null || true)
+          fi
+
+          RAW_DESC=""
+          if [ -n "$PR_BODY" ]; then
+            RAW_DESC="$PR_BODY"
+          elif [ -n "$RELEASE_BODY" ]; then
+            RAW_DESC="$RELEASE_BODY"
+          fi
+
+          DESCRIPTION=$(echo "$RAW_DESC" | head -c 1800)
+          if [ ${#RAW_DESC} -gt 1800 ]; then
+            DESCRIPTION="${DESCRIPTION}…\n\n_[Read full release notes →](${RELEASE_URL})_"
+          fi
+          if [ -z "$DESCRIPTION" ]; then
+            DESCRIPTION="_No description provided._"
+          fi
+
+          if [ -n "$PR_NUMBER" ] && [ -n "$PR_AUTHOR" ]; then
+            AUTHOR_NAME="PR #${PR_NUMBER} by @${PR_AUTHOR}"
+            AUTHOR_URL="${PR_URL:-https://github.com/${PR_AUTHOR}}"
+            AUTHOR_AVATAR="${PR_AVATAR:-https://github.com/${PR_AUTHOR}.png}"
+          else
+            AUTHOR_NAME="@${ACTOR}"
+            AUTHOR_URL="https://github.com/${ACTOR}"
+            AUTHOR_AVATAR="https://github.com/${ACTOR}.png"
+          fi
+
+          if [ -n "$PR_TITLE" ]; then
+            EMBED_DESC="**${PR_TITLE}**\n\n${DESCRIPTION}"
+          else
+            EMBED_DESC="${DESCRIPTION}"
+          fi
+
+          JSON=$(jq -n \
+            --arg project       "Posluchac" \
+            --arg username      "Posluchac" \
+            --arg avatar_url    "https://github.com/${REPO_OWNER}.png" \
+            --arg version       "$VERSION" \
+            --arg release_url   "$RELEASE_URL" \
+            --arg author_name   "$AUTHOR_NAME" \
+            --arg author_url    "$AUTHOR_URL" \
+            --arg author_avatar "$AUTHOR_AVATAR" \
+            --arg description   "$EMBED_DESC" \
+            --arg repo          "$REPO" \
+            '{
+              username:   $username,
+              avatar_url: $avatar_url,
+
+              embeds: [
+                {
+                  title:       ("🎵 " + $project + " " + $version + " released!"),
+                  url:         $release_url,
+                  description: $description,
+                  color:       1948004,
+
+                  author: {
+                    name:     $author_name,
+                    url:      $author_url,
+                    icon_url: $author_avatar
+                  },
+
+                  fields: [
+                    {
+                      name:   "📦 Repository",
+                      value:  ("[`" + $repo + "`](https://github.com/" + $repo + ")"),
+                      inline: true
+                    },
+                    {
+                      name:   "🏷️ Tag",
+                      value:  ("`" + $version + "`"),
+                      inline: true
+                    },
+                    {
+                      name:   "📥 Downloads",
+                      value:  ("[GitHub Releases](" + $release_url + ")"),
+                      inline: true
+                    }
+                  ],
+
+                  footer: {
+                    text:     "Posluchac Release Pipeline · GitHub Actions",
+                    icon_url: "https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+                  },
+
+                  timestamp: (now | todate)
+                }
+              ]
+            }')
+
+          curl -fsSL \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d "$JSON" \
+            "$WEBHOOK_URL"
+
