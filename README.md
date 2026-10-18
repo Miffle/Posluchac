@@ -15,7 +15,7 @@
   <img src="https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Wails-v2-DF1A29?style=flat-square" alt="Wails">
   <img src="https://img.shields.io/badge/Vue-3%20%2B%20TypeScript-42b883?style=flat-square&logo=vue.js" alt="Vue 3">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License: GPLv3"></a>
 </p>
 
 ---
@@ -48,9 +48,10 @@
 * **Favorites & Playlists**: Mark favorite songs (❤️) and organize your collection into custom playlists.
 
 ### 🎛️ Audio Playback & Media Integration
-* **Queue & Playback Modes**: Loop track, repeat playlist, or shuffle queue using Fisher-Yates randomization.
+* **Queue & Playback Modes**: Loop track, repeat playlist, or smart non-repeating shuffle cycle (draw without replacement) with backward history navigation.
+* **Synchronized Lyrics (LRC)**: Real-time karaoke-style running lyrics fetched from LRCLIB or local `.lrc` files with auto-centering and interactive seek.
 * **MediaSession API**: Hardware media keys support (Play, Pause, Next, Prev) and native Windows media overlay.
-* **Fullscreen Cover Mode**: Immersive vinyl-style cover presentation with player controls (`Esc` to exit).
+* **Fullscreen Cover Mode**: Immersive full-screen album art presentation with running lyrics, volume slider, and playback controls (`Esc` to exit).
 
 ### 🔕 Native Windows System Tray
 * **Minimize / Close to Tray**: Closes directly to the Windows notification area to keep music playing in the background.
@@ -176,6 +177,6 @@ Feel free to open an issue or submit a Pull Request on [GitHub](https://github.c
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 
 <p align="center">Made with ❤️ for music lovers.</p>
