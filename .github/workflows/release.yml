@@ -136,13 +136,81 @@ jobs:
           git tag -a $tag -m "Release $tag"
           git push origin $tag
 
+      - name: Generate Changelog
+        if: steps.version_check.outputs.should_release == 'true'
+        id: changelog
+        shell: pwsh
+        run: |
+          $tag     = "${{ steps.version_check.outputs.tag }}"
+          $prevTag = git describe --tags --abbrev=0 HEAD^ 2>$null
+          if (-not $prevTag) { $prevTag = "" }
+
+          # Collect commits since previous tag (or all if first release)
+          if ($prevTag) {
+            $commits = git log "$prevTag..HEAD" --pretty=format:"%s" --no-merges
+          } else {
+            $commits = git log --pretty=format:"%s" --no-merges
+          }
+
+          # Categorise by conventional-commit prefix
+          $features  = @()
+          $fixes     = @()
+          $perf      = @()
+          $other     = @()
+
+          foreach ($line in $commits) {
+            $line = $line.Trim()
+            if (-not $line) { continue }
+            if ($line -match '^feat(\(.+\))?[!:]?\s*') {
+              $features += "- " + ($line -replace '^feat(\(.+\))?[!:]?\s*', '')
+            } elseif ($line -match '^fix(\(.+\))?[!:]?\s*') {
+              $fixes += "- " + ($line -replace '^fix(\(.+\))?[!:]?\s*', '')
+            } elseif ($line -match '^perf(\(.+\))?[!:]?\s*') {
+              $perf += "- " + ($line -replace '^perf(\(.+\))?[!:]?\s*', '')
+            } else {
+              $other += "- $line"
+            }
+          }
+
+          # Build markdown body
+          $nl = [System.Environment]::NewLine
+          $body = "## 🎵 Posluchac $tag$nl$nl"
+          $body += "> Музыкальный плеер с поиском и загрузкой треков через торрент-трекеры.$nl$nl"
+
+          if ($features.Count -gt 0) {
+            $body += "### ✨ Новые возможности$nl" + ($features -join $nl) + "$nl$nl"
+          }
+          if ($fixes.Count -gt 0) {
+            $body += "### 🐛 Исправления$nl" + ($fixes -join $nl) + "$nl$nl"
+          }
+          if ($perf.Count -gt 0) {
+            $body += "### ⚡ Производительность$nl" + ($perf -join $nl) + "$nl$nl"
+          }
+          if ($other.Count -gt 0) {
+            $body += "### 🔧 Прочие изменения$nl" + ($other -join $nl) + "$nl$nl"
+          }
+
+          $body += "---$nl$nl"
+          $body += "### 📥 Установка$nl$nl"
+          $body += "Скачайте **Posluchac.exe** ниже и запустите — установка не нужна.$nl$nl"
+          $body += "| Файл | Описание |$nl"
+          $body += "|------|----------|$nl"
+          $body += "| ``Posluchac.exe`` | Готовый исполняемый файл (рекомендуется) |$nl"
+          $body += "| ``Posluchac-windows-amd64-$tag.zip`` | Zip-архив |$nl$nl"
+          if ($prevTag) {
+            $body += "**Полный список изменений:** [$prevTag...$tag](https://github.com/${{ github.repository }}/compare/$prevTag...$tag)$nl"
+          }
+
+          $body | Out-File -FilePath "release_notes.md" -Encoding utf8
+          Write-Host "Release notes written to release_notes.md"
+
       - name: Create GitHub Release
         if: steps.version_check.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version_check.outputs.tag }}
-          name: Posluchac ${{ steps.version_check.outputs.tag }}
-          generate_release_notes: true
+          name: Послушак ${{ steps.version_check.outputs.tag }}
+          body_path: release_notes.md
           draft: false
           prerelease: false
           files: |

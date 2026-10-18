@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
@@ -17,6 +19,9 @@ var assets embed.FS
 
 func main() {
 	app := NewApp()
+
+	// quit is closed by the tray "Выйти" menu item to trigger a real shutdown.
+	quit := make(chan struct{})
 
 	err := wails.Run(&options.App{
 		Title:  "Posluchac",
@@ -50,8 +55,28 @@ func main() {
 			}),
 		},
 		BackgroundColour: &options.RGBA{R: 18, G: 18, B: 18, A: 1},
-		OnStartup:        app.startup,
-		OnShutdown:       app.shutdown,
+		OnStartup: func(ctx context.Context) {
+			app.startup(ctx)
+			// Start tray in its own goroutine (systray needs its own OS thread internally).
+			go app.runTray(quit)
+			// When "Выйти" is clicked in tray, perform a real shutdown.
+			go func() {
+				<-quit
+				runtime.Quit(ctx)
+			}()
+		},
+		OnShutdown: func(ctx context.Context) {
+			setQuitting()
+			app.shutdown(ctx)
+		},
+		// Hide to tray on window close instead of quitting; allow closing when user explicitly quits.
+		OnBeforeClose: func(ctx context.Context) (prevent bool) {
+			if getQuitting() {
+				return false // Allow Wails to close and exit
+			}
+			runtime.WindowHide(ctx)
+			return true // Prevent close, hide to tray instead
+		},
 		Bind: []interface{}{
 			app,
 		},
@@ -60,4 +85,5 @@ func main() {
 	if err != nil {
 		println("Error:", err.Error())
 	}
+	os.Exit(0)
 }

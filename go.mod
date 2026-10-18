@@ -9,6 +9,7 @@ require (
 	github.com/gopxl/beep v1.4.1
 	github.com/mewkiz/flac v1.0.8
 	github.com/wailsapp/wails/v2 v2.16.0
+	golang.org/x/sys v0.46.0
 	modernc.org/sqlite v1.33.1
 )
 
@@ -114,7 +115,6 @@ require (
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
-	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect

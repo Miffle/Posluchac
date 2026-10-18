@@ -130,6 +130,7 @@ func (a *App) startup(ctx context.Context) {
 
 // shutdown is called by Wails when the app closes.
 func (a *App) shutdown(_ context.Context) {
+	trayRemoveIcon()
 	if a.hotkeys != nil {
 		a.hotkeys.Stop()
 	}
