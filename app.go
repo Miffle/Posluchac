@@ -36,6 +36,7 @@ type App struct {
 	player       *audio.Player
 	library      *library.DB
 	sources      *sources.Manager
+	scraper      *sources.Scraper
 	searcher     *search.MultiSearcher
 	rutracker    *search.RutrackerSearcher
 	hotkeys      *hotkeys.Manager
@@ -93,8 +94,12 @@ func (a *App) startup(ctx context.Context) {
 		a.sources, sErr = sources.NewManager(sqlDB)
 		if sErr != nil {
 			fmt.Println("sources manager error:", sErr)
+		} else {
+			// Start background auto-sync (refreshes stale sources every 24 h).
+			a.sources.StartAutoSync()
 		}
 	}
+	a.scraper = sources.NewScraper()
 	close(a.readySources)
 
 	a.engine, err = torrentpkg.NewEngine(cacheDir, dlDir, sqlDB)
@@ -135,6 +140,9 @@ func (a *App) shutdown(_ context.Context) {
 	trayRemoveIcon()
 	if a.hotkeys != nil {
 		a.hotkeys.Stop()
+	}
+	if a.sources != nil {
+		a.sources.Stop()
 	}
 	a.player.Stop()
 	a.engine.Close()
@@ -310,6 +318,88 @@ func (a *App) SyncSources() error {
 		return nil
 	}
 	return a.sources.SyncAll()
+}
+
+// ScrapeSeederResult is returned per-hash by ScrapeSeeders.
+type ScrapeSeederResult struct {
+	InfoHash  string `json:"infoHash"`
+	MagnetURI string `json:"magnetUri"` // original magnet URI passed by caller
+	Seeders   int    `json:"seeders"`
+	Leechers  int    `json:"leechers"`
+	Completed int    `json:"completed"`
+}
+
+// ScrapeSeeders fetches real seeder/leecher counts from public UDP trackers
+// for the supplied magnet URIs or hex info-hashes.
+//
+// The call blocks for up to ~3 seconds while trackers are queried in parallel,
+// then returns the best result found across all trackers. Already-cached
+// results (fresh within 30 min) are returned immediately without re-scraping.
+func (a *App) ScrapeSeeders(magnetOrHashes []string) []ScrapeSeederResult {
+	if a.scraper == nil || len(magnetOrHashes) == 0 {
+		return nil
+	}
+
+	publicTrackers := []string{
+		"udp://tracker.opentrackr.org:1337",
+		"udp://open.stealth.si:80",
+		"udp://tracker.openbittorrent.com:6969",
+		"udp://exodus.desync.com:6969",
+		"udp://tracker.torrent.eu.org:451",
+	}
+
+	// Deduplicate and extract hex infohashes; keep original magnet for response.
+	type entry struct {
+		hex    string
+		magnet string
+	}
+	var entries []entry
+	seen := make(map[string]bool)
+	for _, raw := range magnetOrHashes {
+		h := sources.ExtractInfoHash(raw)
+		if h == "" || seen[h] {
+			continue
+		}
+		seen[h] = true
+		entries = append(entries, entry{hex: h, magnet: raw})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+
+	hexList := make([]string, len(entries))
+	for i, e := range entries {
+		hexList[i] = e.hex
+	}
+
+	trackerSet := make(map[string]bool)
+	for _, t := range publicTrackers {
+		trackerSet[t] = true
+	}
+	for _, raw := range magnetOrHashes {
+		for _, tr := range sources.ExtractTrackers(raw) {
+			trackerSet[tr] = true
+		}
+	}
+	allTrackers := make([]string, 0, len(trackerSet))
+	for t := range trackerSet {
+		allTrackers = append(allTrackers, t)
+	}
+
+	// Synchronous scrape — blocks until all trackers respond or 2s timeout.
+	scraped := a.scraper.ScrapeSync(allTrackers, hexList)
+
+	out := make([]ScrapeSeederResult, 0, len(entries))
+	for _, e := range entries {
+		r := ScrapeSeederResult{InfoHash: e.hex, MagnetURI: e.magnet}
+		if sr, ok := scraped[e.hex]; ok {
+			r.Seeders = sr.Seeders
+			r.Leechers = sr.Leechers
+			r.Completed = sr.Completed
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // LoginRutracker authenticates with Rutracker via username/password and enables Rutracker in search.

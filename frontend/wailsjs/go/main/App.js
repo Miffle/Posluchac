@@ -166,6 +166,10 @@ export function ScanLibrary() {
   return window['go']['main']['App']['ScanLibrary']();
 }
 
+export function ScrapeSeeders(arg1) {
+  return window['go']['main']['App']['ScrapeSeeders'](arg1);
+}
+
 export function Search(arg1) {
   return window['go']['main']['App']['Search'](arg1);
 }

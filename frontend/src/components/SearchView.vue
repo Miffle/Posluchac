@@ -6,7 +6,8 @@ import {
   DeleteSource,
   ListSources,
   SyncSources,
-  PlayTrack
+  PlayTrack,
+  ScrapeSeeders
 } from '../../wailsjs/go/main/App'
 import { useDownloadsStore, type TorrentFile } from '../store/downloads'
 import { usePlayerStore } from '../store/player'
@@ -51,6 +52,7 @@ const query = ref('')
 const results = ref<SearchResult[]>([])
 const loading = ref(false)
 const error = ref('')
+const pendingScrapes = ref<Set<string>>(new Set())
 
 // Sources Manager (Hydra Launcher style)
 const showSourcesModal = ref(false)
@@ -189,9 +191,13 @@ async function doSearch() {
   loading.value = true
   error.value = ''
   results.value = []
+  pendingScrapes.value.clear()
   try {
     const res = await Search(trimmed)
     results.value = (res || []) as SearchResult[]
+
+    // Kick off async seeder scrape for source results (those with seeders=0)
+    scrapeResultSeeders()
 
     // If query is a magnet link or hash and we got a result, open file picker immediately
     const isMagnetOrHash = trimmed.toLowerCase().startsWith('magnet:') ||
@@ -204,6 +210,62 @@ async function doSearch() {
     error.value = e?.message || t('common.error')
   } finally {
     loading.value = false
+  }
+}
+
+// Scrape real seeder/leecher counts for source results progressively in chunks.
+async function scrapeResultSeeders() {
+  const snapshot = results.value
+  if (!snapshot || snapshot.length === 0) return
+
+  // Source-backed results that still show 0 seeders
+  const targets = snapshot.filter(r => r.seeders === 0 && r.magnetUri && r.magnetUri.startsWith('magnet:'))
+  if (targets.length === 0) return
+
+  // Mark all target magnets as pending
+  for (const r of targets) {
+    if (r.magnetUri) {
+      pendingScrapes.value.add(r.magnetUri)
+    }
+  }
+
+  // Scrape in chunks of 6 so the user sees results progressively appear
+  const chunkSize = 6
+  const magnetList = targets.map(r => r.magnetUri).filter(Boolean) as string[]
+
+  for (let i = 0; i < magnetList.length; i += chunkSize) {
+    if (results.value !== snapshot) break
+
+    const chunk = magnetList.slice(i, i + chunkSize)
+    try {
+      const scraped = await ScrapeSeeders(chunk)
+      if (results.value !== snapshot) break
+
+      if (scraped && scraped.length > 0) {
+        const byMagnet: Record<string, { seeders: number; leechers: number }> = {}
+        for (const s of scraped) {
+          if (s.magnetUri) {
+            byMagnet[s.magnetUri] = { seeders: s.seeders, leechers: s.leechers }
+          }
+        }
+
+        // Reactively patch matching results
+        for (let j = 0; j < results.value.length; j++) {
+          const item = results.value[j]
+          if (item.magnetUri && byMagnet[item.magnetUri] !== undefined) {
+            const patch = byMagnet[item.magnetUri]
+            results.value[j] = { ...item, seeders: patch.seeders, leechers: patch.leechers }
+          }
+        }
+      }
+    } catch {
+      // Ignore network errors
+    } finally {
+      // Clear chunk from pending set so the pulsing spinner disappears immediately
+      for (const m of chunk) {
+        pendingScrapes.value.delete(m)
+      }
+    }
   }
 }
 
@@ -651,7 +713,11 @@ function sourceBadgeClass(source: string) {
           <div class="result-title" :title="r.title">{{ r.title }}</div>
         </div>
         <div class="result-meta">
-          <span class="meta-item seeders" :title="t('search.seeders')">🌱 {{ r.seeders }}</span>
+          <span class="meta-item seeders" :title="t('search.seeders')">
+            <template v-if="r.seeders > 0">🌱 {{ r.seeders }}</template>
+            <template v-else-if="r.magnetUri && pendingScrapes.has(r.magnetUri)"><span class="seeders-pending" :title="t('search.seeders')">🌱 …</span></template>
+            <template v-else>🌱 0</template>
+          </span>
           <span class="meta-item leechers" :title="t('search.leechers')" v-if="r.leechers > 0">⬇ {{ r.leechers }}</span>
           <span class="meta-item size" :title="t('search.size')">{{ r.size }}</span>
         </div>
@@ -937,6 +1003,13 @@ function sourceBadgeClass(source: string) {
 
 .result-meta { display: flex; gap: 12px; font-size: 13px; color: var(--text2); white-space: nowrap; }
 .seeders { color: #4caf50; font-weight: 600; }
+.seeders-pending {
+  color: #4caf50;
+  font-weight: 600;
+  opacity: 0.5;
+  animation: seeds-pulse 1.2s ease-in-out infinite;
+}
+@keyframes seeds-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.8; } }
 
 .btn-sm { padding: 6px 14px; font-size: 13px; white-space: nowrap; }
 .btn-xs { padding: 4px 10px; font-size: 12px; }

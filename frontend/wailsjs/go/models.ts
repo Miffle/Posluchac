@@ -200,6 +200,26 @@ export namespace main {
 		    return a;
 		}
 	}
+	export class ScrapeSeederResult {
+	    infoHash: string;
+	    magnetUri: string;
+	    seeders: number;
+	    leechers: number;
+	    completed: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new ScrapeSeederResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.infoHash = source["infoHash"];
+	        this.magnetUri = source["magnetUri"];
+	        this.seeders = source["seeders"];
+	        this.leechers = source["leechers"];
+	        this.completed = source["completed"];
+	    }
+	}
 
 }
 
@@ -245,6 +265,8 @@ export namespace sources {
 	    itemCount: number;
 	    // Go type: time
 	    updatedAt: any;
+	    // Go type: time
+	    syncedAt: any;
 	
 	    static createFrom(source: any = {}) {
 	        return new Source(source);
@@ -257,6 +279,7 @@ export namespace sources {
 	        this.url = source["url"];
 	        this.itemCount = source["itemCount"];
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.syncedAt = this.convertValues(source["syncedAt"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

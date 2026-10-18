@@ -15,6 +15,9 @@ import (
 	"github.com/user/torrent-player/internal/search"
 )
 
+// AutoSyncInterval is how often sources are refreshed in the background.
+const AutoSyncInterval = 24 * time.Hour
+
 // Source represents an added repository/source.
 type Source struct {
 	ID        int64     `json:"id"`
@@ -22,6 +25,7 @@ type Source struct {
 	URL       string    `json:"url"`
 	ItemCount int       `json:"itemCount"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	SyncedAt  time.Time `json:"syncedAt"`
 }
 
 // DownloadItem represents a single release in the source JSON.
@@ -41,20 +45,65 @@ type SourceJSON struct {
 type Manager struct {
 	db     *sql.DB
 	client *http.Client
+	stopCh chan struct{}
 }
 
 // NewManager creates a sources manager and ensures DB tables exist.
 func NewManager(db *sql.DB) (*Manager, error) {
 	m := &Manager{
-		db: db,
-		client: &http.Client{
-			Timeout: 45 * time.Second,
-		},
+		db:     db,
+		client: &http.Client{Timeout: 45 * time.Second},
+		stopCh: make(chan struct{}),
 	}
 	if err := m.initSchema(); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+// Stop signals the background auto-sync goroutine to exit.
+func (m *Manager) Stop() {
+	select {
+	case <-m.stopCh: // already closed
+	default:
+		close(m.stopCh)
+	}
+}
+
+// StartAutoSync launches a background goroutine that keeps all sources fresh.
+// On startup it immediately syncs any source whose synced_at is older than
+// AutoSyncInterval (or has never been synced). After that it repeats every
+// AutoSyncInterval. The goroutine exits when Stop() is called.
+func (m *Manager) StartAutoSync() {
+	go func() {
+		// Initial sync: check each source and refresh stale ones right away.
+		m.syncStale()
+
+		ticker := time.NewTicker(AutoSyncInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				m.syncStale()
+			case <-m.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+// syncStale refreshes every source that has not been synced within AutoSyncInterval.
+func (m *Manager) syncStale() {
+	sources, err := m.ListSources()
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-AutoSyncInterval)
+	for _, s := range sources {
+		if s.SyncedAt.Before(cutoff) {
+			_, _ = m.AddSource(s.URL)
+		}
+	}
 }
 
 func (m *Manager) initSchema() error {
@@ -64,7 +113,8 @@ func (m *Manager) initSchema() error {
 		name TEXT NOT NULL,
 		url TEXT NOT NULL UNIQUE,
 		item_count INTEGER DEFAULT 0,
-		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		synced_at  DATETIME DEFAULT '1970-01-01 00:00:00'
 	);
 
 	CREATE TABLE IF NOT EXISTS source_downloads (
@@ -80,8 +130,9 @@ func (m *Manager) initSchema() error {
 		return err
 	}
 
-	// Safe column migration for existing tables created before title_lower
+	// Safe column migrations for tables created before these columns existed.
 	_, _ = m.db.Exec(`ALTER TABLE source_downloads ADD COLUMN title_lower TEXT NOT NULL DEFAULT ''`)
+	_, _ = m.db.Exec(`ALTER TABLE sources ADD COLUMN synced_at DATETIME DEFAULT '1970-01-01 00:00:00'`)
 
 	indices := `
 	CREATE INDEX IF NOT EXISTS idx_source_downloads_title ON source_downloads(title);
@@ -187,12 +238,17 @@ func (m *Manager) AddSource(url string) (*Source, error) {
 		return nil, err
 	}
 
+	// Record successful sync time.
+	now := time.Now()
+	_, _ = m.db.Exec(`UPDATE sources SET synced_at = ? WHERE id = ?`, now, sourceID)
+
 	return &Source{
 		ID:        sourceID,
 		Name:      data.Name,
 		URL:       url,
 		ItemCount: len(data.Downloads),
-		UpdatedAt: time.Now(),
+		UpdatedAt: now,
+		SyncedAt:  now,
 	}, nil
 }
 
@@ -217,7 +273,7 @@ func (m *Manager) DeleteSource(id int64) error {
 
 // ListSources returns all registered sources with their item counts.
 func (m *Manager) ListSources() ([]Source, error) {
-	rows, err := m.db.Query(`SELECT id, name, url, item_count, updated_at FROM sources ORDER BY name`)
+	rows, err := m.db.Query(`SELECT id, name, url, item_count, updated_at, synced_at FROM sources ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -226,7 +282,7 @@ func (m *Manager) ListSources() ([]Source, error) {
 	var result []Source
 	for rows.Next() {
 		var s Source
-		if err := rows.Scan(&s.ID, &s.Name, &s.URL, &s.ItemCount, &s.UpdatedAt); err == nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.URL, &s.ItemCount, &s.UpdatedAt, &s.SyncedAt); err == nil {
 			result = append(result, s)
 		}
 	}
@@ -315,7 +371,7 @@ func (m *Manager) Search(ctx context.Context, query string, limit int) []search.
 				MagnetURI: magnetURI,
 				Source:    sourceName,
 				Category:  "Music",
-				Seeders:   10, // Default indicator for sources
+				Seeders:   0, // Real count fetched async via ScrapeSeeders
 				Size:      "Раздача",
 			})
 		}
