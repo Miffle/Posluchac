@@ -29,7 +29,7 @@
 ## ✨ Возможности
 
 ### 🔍 Поиск по торрентам и модульные источники
-* **Пользовательские JSON-источники**: возможность подключать и настраивать собственные каталоги и поисковые индексы.
+* **Пользовательские JSON-источники**: возможность подключать и настраивать собственные каталоги и поисковые индексы (например, из [rutracker-music-links](https://github.com/Miffle/rutracker-music-links/tree/main)).
 * **Инспектор содержимого**: просмотр структуры файлов торрента, аудиоформатов (MP3, FLAC, OGG, WAV, M4A, AAC) и битрейта до начала загрузки.
 
 ### ⚡ Потоковое воспроизведение (Streaming Preview)
@@ -73,6 +73,26 @@ Posluchac распространяется как **портативное ав�
 
 > [!NOTE]
 > Для работы приложения требуется **Windows 10 (версия 1803+)** или **Windows 11** со встроенным компонентом **Microsoft Edge WebView2** (установлен по умолчанию во всех современных версиях Windows).
+
+---
+
+## 📡 Источники музыки (JSON)
+
+Для поиска музыки Posluchac использует внешние JSON-источники раздач.
+
+Готовый каталог музыки с RuTracker находится в репозитории [**Miffle/rutracker-music-links**](https://github.com/Miffle/rutracker-music-links/tree/main).
+
+### Как добавить источник в плеер:
+1. Перейдите в репозиторий [rutracker-music-links](https://github.com/Miffle/rutracker-music-links/tree/main).
+2. Откройте JSON-файл (например, [`rutracker-music.json`](https://github.com/Miffle/rutracker-music-links/blob/main/rutracker-music.json)) и нажмите кнопку **Raw** (или скопируйте прямую ссылку на сырой файл).
+   * Прямая ссылка: `https://raw.githubusercontent.com/Miffle/rutracker-music-links/main/rutracker-music.json`
+3. В приложении Posluchac откройте страницу **«Поиск»** и нажмите кнопку **«Источники»** в верхней части экрана.
+4. Вставьте скопированную ссылку в строку ввода и нажмите **«Добавить»**.
+5. Релизы загрузятся в локальную базу данных и сразу появятся в поиске.
+
+> [!TIP]
+> **Расширение базы через Pull Request:**
+> Вы можете пополнять каталог новыми раздачами и исполнителями! Для этого делайте Fork репозитория [rutracker-music-links](https://github.com/Miffle/rutracker-music-links/tree/main), добавляйте новые раздачи в JSON-файл и отправляйте изменения через **Pull Request (PR)**.
 
 ---
 

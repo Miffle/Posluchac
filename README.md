@@ -29,7 +29,7 @@
 ## ✨ Features
 
 ### 🔍 Torrent Search & Multiple Sources
-* **Modular Custom Sources**: Add and manage custom JSON torrent indexes and search providers.
+* **Modular Custom Sources**: Add and manage custom JSON torrent indexes and search providers (e.g. from [rutracker-music-links](https://github.com/Miffle/rutracker-music-links/tree/main)).
 * **File Inspector**: View all files, audio formats (MP3, FLAC, OGG, WAV, M4A, AAC), and file sizes in a torrent before starting the download.
 
 ### ⚡ Instant Streaming Preview
@@ -73,6 +73,26 @@ Posluchac is distributed as a **portable, standalone Windows executable**. No in
 
 > [!NOTE]
 > Posluchac requires **Windows 10 (version 1803+)** or **Windows 11** with the **Microsoft Edge WebView2 Runtime** (pre-installed on modern Windows systems).
+
+---
+
+## 📡 Music Sources (JSON)
+
+Posluchac relies on external JSON sources to search and discover music releases.
+
+A ready-to-use music catalog from RuTracker is available in the [**Miffle/rutracker-music-links**](https://github.com/Miffle/rutracker-music-links/tree/main) repository.
+
+### How to Add a Source:
+1. Open the [rutracker-music-links](https://github.com/Miffle/rutracker-music-links/tree/main) repository.
+2. Open the JSON file (e.g. [`rutracker-music.json`](https://github.com/Miffle/rutracker-music-links/blob/main/rutracker-music.json)) and click the **Raw** button to get the raw URL (or copy the direct raw link).
+   * Direct Raw link: `https://raw.githubusercontent.com/Miffle/rutracker-music-links/main/rutracker-music.json`
+3. Launch Posluchac, switch to the **Search** page, and click the **"Sources"** button in the header.
+4. Paste the copied link into the input field and click **"Add"**.
+5. The index will sync into your local database and the releases will be instantly searchable!
+
+> [!TIP]
+> **Expand the Catalog via Pull Requests:**
+> If you'd like to suggest new releases or expand the music library, you are encouraged to add them directly to the JSON file in [rutracker-music-links](https://github.com/Miffle/rutracker-music-links/tree/main) and submit a **Pull Request (PR)**!
 
 ---
 
