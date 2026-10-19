@@ -82,8 +82,8 @@ export function GetLibrary() {
   return window['go']['main']['App']['GetLibrary']();
 }
 
-export function GetLyrics(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['GetLyrics'](arg1, arg2, arg3, arg4, arg5);
+export function GetLyrics(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['GetLyrics'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GetPlaylistTracks(arg1) {

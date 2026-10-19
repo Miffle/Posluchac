@@ -180,6 +180,10 @@ async function fetchLyrics(force: boolean = false) {
   if (!force && key === lastLoadedKey.value && lyricsData.value) {
     return
   }
+  // On force-retry also clear the key so state is fully reset
+  if (force) {
+    lastLoadedKey.value = ''
+  }
   lastLoadedKey.value = key
 
   // Reset scroll and manual state on new track
@@ -197,7 +201,8 @@ async function fetchLyrics(force: boolean = false) {
       title,
       album,
       s.value.durationSec || 0,
-      tr.filePath || ''
+      tr.filePath || '',
+      force        // bypass backend cache when user clicked "Retry"
     )
     lyricsData.value = res as any
     nextTick(() => {
@@ -492,7 +497,9 @@ onUnmounted(() => {
               :disabled="player.playlist.length === 0"
               :title="t('player.prevTrack')"
             >
-              ⏮
+              <svg viewBox="0 0 24 24" class="fs-nav-svg">
+                <path fill="currentColor" d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+              </svg>
             </button>
 
             <!-- Play / Pause -->
@@ -517,7 +524,9 @@ onUnmounted(() => {
               :disabled="player.playlist.length === 0"
               :title="t('player.nextTrack')"
             >
-              ⏭
+              <svg viewBox="0 0 24 24" class="fs-nav-svg">
+                <path fill="currentColor" d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+              </svg>
             </button>
 
             <!-- Repeat -->
@@ -1174,16 +1183,23 @@ onUnmounted(() => {
 }
 
 .fs-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  aspect-ratio: 1 / 1;
   background: transparent;
   border: none;
   color: var(--text);
-  font-size: 22px;
+  font-size: 20px;
   cursor: pointer;
-  padding: 8px;
+  padding: 0;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  flex-shrink: 0;
   opacity: 0.75;
   transition: all 0.15s ease;
 }
@@ -1197,6 +1213,12 @@ onUnmounted(() => {
 .fs-btn:disabled {
   opacity: 0.25;
   cursor: not-allowed;
+}
+
+.fs-nav-svg {
+  width: 24px;
+  height: 24px;
+  display: block;
 }
 
 .fs-shuffle-btn.active,

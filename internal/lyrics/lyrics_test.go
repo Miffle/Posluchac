@@ -50,7 +50,7 @@ func TestLocalLRC(t *testing.T) {
 	}
 
 	client := NewClient()
-	res, err := client.GetLyrics(context.Background(), "Artist", "Song", "Album", 180, audioPath)
+	res, err := client.GetLyrics(context.Background(), "Artist", "Song", "Album", 180, audioPath, false)
 	if err != nil {
 		t.Fatalf("GetLyrics error: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestCache(t *testing.T) {
 	}
 	client.cacheMu.Unlock()
 
-	res, err := client.GetLyrics(context.Background(), "queen", "Radio Ga Ga", "", 0, "")
+	res, err := client.GetLyrics(context.Background(), "queen", "Radio Ga Ga", "", 0, "", false)
 	if err != nil {
 		t.Fatalf("GetLyrics cache test failed: %v", err)
 	}

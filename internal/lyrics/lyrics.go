@@ -51,9 +51,17 @@ type Client struct {
 // NewClient creates a new lyrics client.
 func NewClient() *Client {
 	return &Client{
-		httpClient: &http.Client{Timeout: 6 * time.Second},
+		httpClient: &http.Client{Timeout: 8 * time.Second},
 		cache:      make(map[string]*Result),
 	}
+}
+
+// InvalidateCache removes a cache entry so the next call re-fetches from the API.
+func (c *Client) InvalidateCache(artist, title string) {
+	ck := cacheKey(artist, cleanTitle(title))
+	c.cacheMu.Lock()
+	delete(c.cache, ck)
+	c.cacheMu.Unlock()
 }
 
 // cacheKey generates a normalized cache key.
@@ -63,7 +71,8 @@ func cacheKey(artist, title string) string {
 
 // GetLyrics searches for lyrics first in local file directory, then in memory cache,
 // and finally queries the LRCLIB API.
-func (c *Client) GetLyrics(ctx context.Context, artist, title, album string, durationSec float64, filePath string) (*Result, error) {
+// If force is true the cached entry is evicted so a fresh API request is made.
+func (c *Client) GetLyrics(ctx context.Context, artist, title, album string, durationSec float64, filePath string, force bool) (*Result, error) {
 	artist = strings.TrimSpace(artist)
 	title = strings.TrimSpace(title)
 
@@ -81,24 +90,33 @@ func (c *Client) GetLyrics(ctx context.Context, artist, title, album string, dur
 		return &Result{Found: false}, nil
 	}
 
-	// 2. Check in-memory cache
 	ck := cacheKey(artist, cleanedTitle)
-	c.cacheMu.RLock()
-	if cached, ok := c.cache[ck]; ok {
+
+	if force {
+		// Evict stale cache entry so we hit the API again
+		c.cacheMu.Lock()
+		delete(c.cache, ck)
+		c.cacheMu.Unlock()
+	} else {
+		// 2. Check in-memory cache
+		c.cacheMu.RLock()
+		if cached, ok := c.cache[ck]; ok {
+			c.cacheMu.RUnlock()
+			return cached, nil
+		}
 		c.cacheMu.RUnlock()
-		return cached, nil
 	}
-	c.cacheMu.RUnlock()
 
 	// 3. Query LRCLIB API
-	res, err := c.fetchFromLRCLIB(ctx, artist, cleanedTitle, album, durationSec)
-	if err != nil || res == nil || !res.Found {
-		// If artist was provided, also try searching with query string "Artist - Title"
+	res, _ := c.fetchFromLRCLIB(ctx, artist, cleanedTitle, album, durationSec)
+	if res == nil || !res.Found {
+		// Also try the search endpoint
 		if artist != "" {
 			if searchRes, sErr := c.searchLRCLIB(ctx, artist+" "+cleanedTitle); sErr == nil && searchRes != nil && searchRes.Found {
 				res = searchRes
 			}
-		} else {
+		}
+		if res == nil || !res.Found {
 			if searchRes, sErr := c.searchLRCLIB(ctx, cleanedTitle); sErr == nil && searchRes != nil && searchRes.Found {
 				res = searchRes
 			}
@@ -109,10 +127,13 @@ func (c *Client) GetLyrics(ctx context.Context, artist, title, album string, dur
 		res = &Result{Found: false, Artist: artist, Title: cleanedTitle}
 	}
 
-	// Store in cache
-	c.cacheMu.Lock()
-	c.cache[ck] = res
-	c.cacheMu.Unlock()
+	// Only cache successful finds. Transient 5xx failures are not cached so
+	// the user can retry and get a fresh result.
+	if res.Found {
+		c.cacheMu.Lock()
+		c.cache[ck] = res
+		c.cacheMu.Unlock()
+	}
 
 	return res, nil
 }
@@ -171,6 +192,32 @@ func (c *Client) checkLocalLRC(audioPath, artist, title string) *Result {
 	return nil
 }
 
+// doWithRetry executes an HTTP request and retries up to maxRetries times on 5xx responses,
+// waiting retryDelay between attempts. Only GET requests with no body are supported.
+func (c *Client) doWithRetry(req *http.Request, maxRetries int, retryDelay time.Duration) (*http.Response, error) {
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			case <-time.After(retryDelay):
+			}
+		}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			// Network error – retry
+			continue
+		}
+		// Retry only on 5xx (server-side transient errors)
+		if resp.StatusCode >= 500 {
+			resp.Body.Close()
+			continue
+		}
+		return resp, nil
+	}
+	return nil, fmt.Errorf("lrclib: server unavailable after %d attempts", maxRetries+1)
+}
+
 // fetchFromLRCLIB queries GET https://lrclib.net/api/get.
 func (c *Client) fetchFromLRCLIB(ctx context.Context, artist, title, album string, durationSec float64) (*Result, error) {
 	endpoint := "https://lrclib.net/api/get"
@@ -193,7 +240,7 @@ func (c *Client) fetchFromLRCLIB(ctx context.Context, artist, title, album strin
 	}
 	req.Header.Set("User-Agent", "Posluchac/1.3.0 (https://github.com/user/torrent-player)")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(req, 2, 800*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +290,7 @@ func (c *Client) searchLRCLIB(ctx context.Context, query string) (*Result, error
 	}
 	req.Header.Set("User-Agent", "Posluchac/1.3.0 (https://github.com/user/torrent-player)")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := c.doWithRetry(req, 2, 800*time.Millisecond)
 	if err != nil {
 		return nil, err
 	}

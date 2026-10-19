@@ -1197,11 +1197,13 @@ func (a *App) OpenExternalURL(url string) error {
 // ─── Lyrics (LRC) ────────────────────────────────────────────────────────────
 
 // GetLyrics searches for synchronized or plain lyrics from local files or LRCLIB.
-func (a *App) GetLyrics(artist, title, album string, durationSec float64, filePath string) (*lyrics.Result, error) {
+// Set force=true to bypass the in-memory cache and retry the API (e.g. after a transient error).
+func (a *App) GetLyrics(artist, title, album string, durationSec float64, filePath string, force bool) (*lyrics.Result, error) {
 	if a.lyrics == nil {
 		a.lyrics = lyrics.NewClient()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	// Enough headroom for 3 attempts × (8 s timeout + 800 ms delay)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return a.lyrics.GetLyrics(ctx, artist, title, album, durationSec, filePath)
+	return a.lyrics.GetLyrics(ctx, artist, title, album, durationSec, filePath, force)
 }

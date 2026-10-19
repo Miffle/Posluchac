@@ -49,7 +49,7 @@ export function GetFavourites():Promise<Array<library.Track>>;
 
 export function GetLibrary():Promise<Array<library.Track>>;
 
-export function GetLyrics(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string):Promise<lyrics.Result>;
+export function GetLyrics(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string,arg6:boolean):Promise<lyrics.Result>;
 
 export function GetPlaylistTracks(arg1:number):Promise<Array<library.Track>>;
 
