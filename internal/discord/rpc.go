@@ -19,6 +19,7 @@ const (
 	DefaultClientID = "1561711243608330281"
 	DefaultLogo     = "posluchac_logo"
 	GithubURL       = "https://github.com/Miffle/Posluchac"
+	GithubReleases  = "https://github.com/Miffle/Posluchac/releases"
 )
 
 // TrackActivity describes the current playback state sent to Discord.
@@ -193,13 +194,17 @@ func (c *Client) SetActivity(act TrackActivity) error {
 		"state":   state,
 		"assets": map[string]interface{}{
 			"large_image": DefaultLogo,
-			"large_text":  "Posluchac — Torrent Music Player",
+			"large_text":  "Posluchac • github.com/Miffle/Posluchac",
 			"small_image": "playing",
-			"small_text":  "Воспроизведение",
+			"small_text":  "Воспроизведение 🎵",
 		},
 		"buttons": []map[string]interface{}{
 			{
-				"label": "Слушать в Posluchac",
+				"label": "Скачать Posluchac",
+				"url":   GithubReleases,
+			},
+			{
+				"label": "GitHub Проекта",
 				"url":   GithubURL,
 			},
 		},
