@@ -49,6 +49,8 @@ export function GetAppVersion():Promise<string>;
 
 export function GetCover(arg1:string):Promise<string>;
 
+export function GetDiscordClientID():Promise<string>;
+
 export function GetDiscordRPCEnabled():Promise<boolean>;
 
 export function GetDownloadDir():Promise<string>;
@@ -120,6 +122,8 @@ export function Search(arg1:string,arg2:string):Promise<Array<search.Result>>;
 export function SearchLibrary(arg1:string):Promise<Array<library.Track>>;
 
 export function SeekTo(arg1:number):Promise<void>;
+
+export function SetDiscordClientID(arg1:string):Promise<void>;
 
 export function SetDiscordRPCEnabled(arg1:boolean):Promise<void>;
 

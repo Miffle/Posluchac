@@ -11,7 +11,9 @@ import {
   ChooseLibraryFolderDialog,
   ScanLibrary,
   GetDiscordRPCEnabled,
-  SetDiscordRPCEnabled
+  SetDiscordRPCEnabled,
+  GetDiscordClientID,
+  SetDiscordClientID
 } from '../../wailsjs/go/main/App'
 
 export type Language = 'ru' | 'en'
@@ -32,6 +34,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const libraryFolders = ref<LibraryFolder[]>([])
   const isScanning = ref<boolean>(false)
   const discordRPCEnabled = ref<boolean>(true)
+  const discordClientID = ref<string>('')
 
   function setLanguage(lang: Language) {
     language.value = lang
@@ -41,6 +44,7 @@ export const useSettingsStore = defineStore('settings', () => {
   async function loadDiscordRPC() {
     try {
       discordRPCEnabled.value = await GetDiscordRPCEnabled()
+      discordClientID.value = await GetDiscordClientID()
     } catch {
       // ignore
     }
@@ -50,6 +54,15 @@ export const useSettingsStore = defineStore('settings', () => {
     discordRPCEnabled.value = enabled
     try {
       await SetDiscordRPCEnabled(enabled)
+    } catch {
+      // ignore
+    }
+  }
+
+  async function setDiscordClientID(id: string) {
+    discordClientID.value = id
+    try {
+      await SetDiscordClientID(id)
     } catch {
       // ignore
     }
@@ -141,6 +154,7 @@ export const useSettingsStore = defineStore('settings', () => {
     libraryFolders,
     isScanning,
     discordRPCEnabled,
+    discordClientID,
     setLanguage,
     loadDownloadDir,
     openFolder,
@@ -152,5 +166,6 @@ export const useSettingsStore = defineStore('settings', () => {
     rescanLibrary,
     loadDiscordRPC,
     setDiscordRPC,
+    setDiscordClientID,
   }
 })

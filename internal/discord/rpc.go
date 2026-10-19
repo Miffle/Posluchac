@@ -77,6 +77,24 @@ func (c *Client) IsEnabled() bool {
 	return c.enabled
 }
 
+// SetClientID updates the Discord Application ID and reconnects if changed.
+func (c *Client) SetClientID(clientID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.clientID == clientID {
+		return
+	}
+	c.clientID = clientID
+	_ = c.closeLocked()
+}
+
+// GetClientID returns the currently configured Discord Application ID.
+func (c *Client) GetClientID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.clientID
+}
+
 // Connect attempts to connect to the Discord IPC pipe.
 func (c *Client) Connect() error {
 	c.mu.Lock()
@@ -85,7 +103,7 @@ func (c *Client) Connect() error {
 }
 
 func (c *Client) connectLocked() error {
-	if !c.enabled {
+	if !c.enabled || c.clientID == "" {
 		return nil
 	}
 	if c.connected && c.conn != nil {
@@ -127,10 +145,20 @@ func (c *Client) connectLocked() error {
 	}
 
 	// Read handshake response
-	buf := make([]byte, 1024)
+	buf := make([]byte, 2048)
 	_ = c.conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	_, _ = c.conn.Read(buf)
+	n, readErr := c.conn.Read(buf)
 	_ = c.conn.SetReadDeadline(time.Time{})
+	if readErr != nil || n < 8 {
+		_ = c.closeLocked()
+		return fmt.Errorf("discord handshake failed: %v", readErr)
+	}
+
+	opcode := binary.LittleEndian.Uint32(buf[0:4])
+	if opcode == 2 {
+		_ = c.closeLocked()
+		return fmt.Errorf("discord rejected handshake: %s", string(buf[8:n]))
+	}
 
 	c.connected = true
 	return nil

@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { onMounted, computed, ref } from 'vue'
+import { onMounted, computed, ref, watch } from 'vue'
 import { useSettingsStore, type Language, type LibraryFolder } from '../store/settings'
 import { useUpdaterStore } from '../store/updater'
 import { useDialogStore } from '../store/dialog'
@@ -16,6 +16,20 @@ const customUlInput = ref('')
 const isCustomDl = ref(false)
 const isCustomUl = ref(false)
 const rescanMessage = ref('')
+const clientIdInput = ref('')
+
+watch(() => settings.discordClientID, (val) => {
+  clientIdInput.value = val || ''
+}, { immediate: true })
+
+async function saveClientID() {
+  await settings.setDiscordClientID(clientIdInput.value.trim())
+  dialog.toast(t('settings.discordClientIDSaved'), 'success')
+}
+
+function openDiscordDevPortal() {
+  OpenExternalURL('https://discord.com/developers/applications')
+}
 
 const dlPresets = computed(() => [
   { value: 0, label: t('settings.unlimited') },
@@ -357,6 +371,29 @@ function openGithub() {
             />
             <span class="slider round"></span>
           </label>
+        </div>
+
+        <!-- Application ID Configuration -->
+        <div class="discord-id-block" v-if="settings.discordRPCEnabled">
+          <div class="discord-id-header">
+            <span class="discord-id-title">{{ t('settings.discordClientID') }}</span>
+            <button type="button" class="btn-link" @click="openDiscordDevPortal">
+              ↗ {{ t('settings.discordClientIDLink') }}
+            </button>
+          </div>
+          <p class="discord-id-desc">{{ t('settings.discordClientIDDesc') }}</p>
+          <div class="discord-id-row">
+            <input
+              v-model="clientIdInput"
+              type="text"
+              class="discord-id-input"
+              :placeholder="t('settings.discordClientIDPlaceholder')"
+              @keyup.enter="saveClientID"
+            />
+            <button class="btn btn-secondary btn-sm" @click="saveClientID">
+              {{ t('settings.discordClientIDSave') }}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -956,5 +993,72 @@ input:checked + .slider {
 input:checked + .slider:before {
   transform: translateX(22px);
   background-color: #000000;
+}
+
+.discord-id-block {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.discord-id-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.discord-id-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  transition: opacity 0.15s;
+}
+
+.btn-link:hover {
+  opacity: 0.8;
+}
+
+.discord-id-desc {
+  font-size: 12px;
+  color: var(--text2);
+  line-height: 1.4;
+  margin: 0;
+}
+
+.discord-id-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.discord-id-input {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: monospace;
+}
+
+.discord-id-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 </style>

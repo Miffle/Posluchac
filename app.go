@@ -138,6 +138,10 @@ func (a *App) startup(ctx context.Context) {
 		if err := sqlDB.QueryRow(`SELECT value FROM app_settings WHERE key = 'discord_rpc_enabled'`).Scan(&rpcEnabledStr); err == nil {
 			a.discord.SetEnabled(rpcEnabledStr != "false" && rpcEnabledStr != "0")
 		}
+		var clientIDStr string
+		if err := sqlDB.QueryRow(`SELECT value FROM app_settings WHERE key = 'discord_client_id'`).Scan(&clientIDStr); err == nil && clientIDStr != "" {
+			a.discord.SetClientID(clientIDStr)
+		}
 	}
 
 	// Run initial library scan and background watcher for Music/TorrentPlayer
@@ -795,6 +799,34 @@ func (a *App) SetDiscordRPCEnabled(enabled bool) error {
 			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, val)
 	}
 	if enabled {
+		st := a.player.Status()
+		if st.State == audio.StatePlaying && st.Track != nil {
+			go a.updateDiscordActivity(st.Track, st.PositionSec, st.DurationSec)
+		}
+	}
+	return nil
+}
+
+// GetDiscordClientID returns the configured Discord Application ID.
+func (a *App) GetDiscordClientID() string {
+	if a.discord == nil {
+		return ""
+	}
+	return a.discord.GetClientID()
+}
+
+// SetDiscordClientID updates the Discord Application ID and reconnects.
+func (a *App) SetDiscordClientID(clientID string) error {
+	clientID = strings.TrimSpace(clientID)
+	if a.discord != nil {
+		a.discord.SetClientID(clientID)
+	}
+	if a.library != nil && a.library.SQLDB() != nil {
+		_, _ = a.library.SQLDB().Exec(`
+			INSERT INTO app_settings (key, value) VALUES ('discord_client_id', ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, clientID)
+	}
+	if a.discord != nil && a.discord.IsEnabled() && clientID != "" {
 		st := a.player.Status()
 		if st.State == audio.StatePlaying && st.Track != nil {
 			go a.updateDiscordActivity(st.Track, st.PositionSec, st.DurationSec)
