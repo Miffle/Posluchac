@@ -330,16 +330,40 @@ func (a *App) Search(query string, formatFilter string) []search.Result {
 	}
 
 	scraperResults := a.searcher.Search(a.ctx, scraperQuery, 30)
-	if formatFilter != "" && formatFilter != "all" {
-		var filtered []search.Result
-		for _, r := range scraperResults {
-			if sources.MatchesFormat(r.Title, formatFilter) {
-				filtered = append(filtered, r)
+
+	// Filter external scraper results for relevance and format constraints
+	queryTokens := sources.ExtractTokens(cleanQuery)
+	var requiredTokens []string
+	for _, tok := range queryTokens {
+		tLower := strings.ToLower(tok)
+		if !sources.IsFormatStopword(tLower) && len(tok) >= 3 {
+			requiredTokens = append(requiredTokens, tLower)
+		}
+	}
+
+	var validScraperResults []search.Result
+	for _, r := range scraperResults {
+		if formatFilter != "" && formatFilter != "all" && !sources.MatchesFormat(r.Title, formatFilter) {
+			continue
+		}
+		// For multi-word queries (e.g. "Baby Cute"), ensure all required tokens are present in the title
+		if len(requiredTokens) >= 2 {
+			rTitleLower := strings.ToLower(r.Title)
+			matchedAll := true
+			for _, tok := range requiredTokens {
+				if !strings.Contains(rTitleLower, tok) {
+					matchedAll = false
+					break
+				}
+			}
+			if !matchedAll {
+				continue
 			}
 		}
-		scraperResults = filtered
+		validScraperResults = append(validScraperResults, r)
 	}
-	results = append(results, scraperResults...)
+
+	results = append(results, validScraperResults...)
 	return results
 }
 
