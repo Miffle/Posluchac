@@ -188,6 +188,7 @@ func (c *Client) SetActivity(act TrackActivity) error {
 	}
 
 	activityObj := map[string]interface{}{
+		"type":    2, // 2 = Listening to (Слушает)
 		"details": details,
 		"state":   state,
 		"assets": map[string]interface{}{
@@ -205,9 +206,9 @@ func (c *Client) SetActivity(act TrackActivity) error {
 	}
 
 	if act.DurationSec > 0 {
-		now := time.Now()
-		start := now.Add(-time.Duration(act.PositionSec * float64(time.Second))).UnixMilli()
-		end := start + int64(act.DurationSec*1000)
+		now := time.Now().Unix()
+		start := now - int64(act.PositionSec)
+		end := start + int64(act.DurationSec)
 		activityObj["timestamps"] = map[string]interface{}{
 			"start": start,
 			"end":   end,

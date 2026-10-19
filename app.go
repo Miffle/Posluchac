@@ -739,8 +739,14 @@ func (a *App) PlayTrack(infoHash, filePath string) error {
 	playErr := a.player.Play(r, ext, track)
 	if playErr == nil {
 		go func(dp string, tr audio.TrackInfo) {
-			time.Sleep(300 * time.Millisecond)
-			st := a.player.Status()
+			var st audio.Status
+			for i := 0; i < 15; i++ {
+				time.Sleep(150 * time.Millisecond)
+				st = a.player.Status()
+				if st.DurationSec > 0 {
+					break
+				}
+			}
 			if st.DurationSec > 0 && a.library != nil {
 				_ = a.library.UpdateTrackDurationByPath(dp, st.DurationSec)
 			}
@@ -818,7 +824,16 @@ func (a *App) updateDiscordActivity(track *audio.TrackInfo, pos, dur float64) {
 }
 
 // SeekTo seeks to the given position in seconds.
-func (a *App) SeekTo(seconds float64) error { return a.player.SeekTo(seconds) }
+func (a *App) SeekTo(seconds float64) error {
+	err := a.player.SeekTo(seconds)
+	if err == nil {
+		st := a.player.Status()
+		if a.discord != nil && st.State == audio.StatePlaying && st.Track != nil {
+			go a.updateDiscordActivity(st.Track, seconds, st.DurationSec)
+		}
+	}
+	return err
+}
 
 // SetVolume sets volume in [0.0, 1.0].
 func (a *App) SetVolume(v float64) { a.player.SetVolume(v) }
