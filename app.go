@@ -804,6 +804,115 @@ func (a *App) ImportTrackToLibrary(infoHash, filePath string) (library.Track, er
 	return track, nil
 }
 
+// IsCurrentTrackSaved returns true if the current playing track is already saved in the local library.
+func (a *App) IsCurrentTrackSaved() bool {
+	st := a.player.Status()
+	if st.Track == nil || a.library == nil {
+		return false
+	}
+	// If it's explicitly local
+	if st.Track.InfoHash == "" || st.Track.InfoHash == "local" {
+		return true
+	}
+	// Check if already in library by infoHash and path
+	if a.library.HasTrack(st.Track.InfoHash, st.Track.FilePath) {
+		return true
+	}
+	// Check if exported file exists on disk and is in library
+	diskPath := filepath.Join(a.downloadDir, st.Track.FilePath)
+	if t, err := a.library.GetTrackByPath(diskPath); err == nil && t != nil {
+		return true
+	}
+	return false
+}
+
+// SaveCurrentStreamedTrack completely downloads the currently streamed torrent track,
+// exports it to the music directory, and registers it in the library.
+func (a *App) SaveCurrentStreamedTrack() (*library.Track, error) {
+	st := a.player.Status()
+	if st.Track == nil {
+		return nil, fmt.Errorf("no track currently playing")
+	}
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+
+	infoHash := st.Track.InfoHash
+	filePath := st.Track.FilePath
+
+	// If already a local file
+	if infoHash == "" || infoHash == "local" {
+		if t, err := a.library.GetTrackByPath(filePath); err == nil && t != nil {
+			return t, nil
+		}
+		// If on disk, import it
+		if fi, err := os.Stat(filePath); err == nil && !fi.IsDir() {
+			imp, impErr := a.ImportTrackToLibrary("", filePath)
+			if impErr == nil {
+				return &imp, nil
+			}
+		}
+		return nil, fmt.Errorf("track is already local")
+	}
+
+	// Streamed from a torrent: ensure file is downloaded and exported
+	exportedPath, err := a.engine.ExportStreamedFile(infoHash, filePath, a.downloadDir, 60*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("export track: %w", err)
+	}
+
+	// Read metadata from newly exported file
+	tags, _ := metadata.ReadFile(exportedPath)
+	if tags == nil {
+		tags = &metadata.Tags{}
+	}
+
+	fileName := filepath.Base(exportedPath)
+	artist, album, title, year := parseSmartAudioInfo(a.downloadDir, exportedPath, tags)
+
+	var durationSec float64
+	if st.DurationSec > 0 {
+		durationSec = st.DurationSec
+	} else {
+		durationSec = audio.GetFileDuration(exportedPath)
+	}
+
+	var sizeBytes int64
+	if fi, statErr := os.Stat(exportedPath); statErr == nil {
+		sizeBytes = fi.Size()
+	}
+
+	coverPath := findCoverInDir(filepath.Dir(exportedPath))
+	if coverPath == "" && tags != nil && len(tags.CoverData) > 0 {
+		coverPath, _ = metadata.SaveCover(tags, exportedPath)
+	}
+	if coverPath == "" && st.Track.CoverPath != "" {
+		coverPath = st.Track.CoverPath
+	}
+
+	track := library.Track{
+		InfoHash:    "local",
+		FilePath:    exportedPath,
+		FileName:    fileName,
+		Title:       title,
+		Artist:      artist,
+		Album:       album,
+		Year:        year,
+		Genre:       tags.Genre,
+		DurationSec: durationSec,
+		SizeByes:    sizeBytes,
+		CoverPath:   coverPath,
+	}
+
+	trackID, err := a.library.AddTrack(track)
+	if err != nil {
+		return nil, fmt.Errorf("add track to library: %w", err)
+	}
+	track.ID = trackID
+
+	return &track, nil
+}
+
 // ─── Playlists ────────────────────────────────────────────────────────────────
 
 // CreatePlaylist creates a new playlist.

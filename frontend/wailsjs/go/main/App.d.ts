@@ -75,6 +75,10 @@ export function ImportPlaylist():Promise<library.Playlist>;
 
 export function ImportTrackToLibrary(arg1:string,arg2:string):Promise<library.Track>;
 
+export function IsCurrentTrackSaved():Promise<boolean>;
+
+export function SaveCurrentStreamedTrack():Promise<library.Track>;
+
 export function ListPlaylists():Promise<Array<library.Playlist>>;
 
 export function ListSources():Promise<Array<sources.Source>>;

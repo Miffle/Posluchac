@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { GetStatus, Pause, Stop, SeekTo, SetVolume, PlayTrack } from '../../wailsjs/go/main/App'
+import { GetStatus, Pause, Stop, SeekTo, SetVolume, PlayTrack, IsCurrentTrackSaved, SaveCurrentStreamedTrack } from '../../wailsjs/go/main/App'
 
 export interface PlayerStatus {
   state: 'playing' | 'paused' | 'stopped'
@@ -48,6 +48,8 @@ export const usePlayerStore = defineStore('player', () => {
   const playlist = ref<QueueTrack[]>([])
   const currentIndex = ref<number>(-1)
   const isCoverFullscreen = ref<boolean>(false)
+  const isCurrentSaved = ref<boolean>(false)
+  const isSavingTrack = ref<boolean>(false)
 
   // Shuffle queue & history for non-repeating shuffle cycle with backward navigation
   const unplayedIndices = ref<number[]>([])
@@ -89,6 +91,38 @@ export const usePlayerStore = defineStore('player', () => {
   let lastState = 'stopped'
   let volumeInitialized = false
 
+  async function checkIfCurrentSaved() {
+    const tr = status.value.track
+    if (!tr) {
+      isCurrentSaved.value = false
+      return
+    }
+    if (!tr.infoHash || tr.infoHash === 'local') {
+      isCurrentSaved.value = true
+      return
+    }
+    try {
+      isCurrentSaved.value = await IsCurrentTrackSaved()
+    } catch {
+      isCurrentSaved.value = false
+    }
+  }
+
+  async function saveCurrentTrack(): Promise<boolean> {
+    if (isSavingTrack.value) return false
+    isSavingTrack.value = true
+    try {
+      const res = await SaveCurrentStreamedTrack()
+      if (res && res.id) {
+        isCurrentSaved.value = true
+        return true
+      }
+      return false
+    } finally {
+      isSavingTrack.value = false
+    }
+  }
+
   function startPolling() {
     pollInterval = setInterval(async () => {
       try {
@@ -100,9 +134,14 @@ export const usePlayerStore = defineStore('player', () => {
         const s = (await GetStatus()) as PlayerStatus
         const prev = lastState
         lastState = s.state
+        const trackChanged = (s.track?.filePath !== status.value.track?.filePath) || (s.track?.infoHash !== status.value.track?.infoHash)
         status.value = {
           ...s,
           volume: status.value.volume
+        }
+
+        if (trackChanged) {
+          checkIfCurrentSaved()
         }
 
         // Track finished naturally (was playing, now stopped)
@@ -297,6 +336,10 @@ export const usePlayerStore = defineStore('player', () => {
     seek,
     setVolume,
     toggleRepeat,
-    toggleShuffle
+    toggleShuffle,
+    isCurrentSaved,
+    isSavingTrack,
+    checkIfCurrentSaved,
+    saveCurrentTrack
   }
 })

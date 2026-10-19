@@ -77,6 +77,10 @@ export const translations = {
       syncedLyrics: 'Синхронизированный текст',
       retryLyrics: 'Повторить поиск',
       syncLyrics: 'К текущей строке',
+      saveTrackBtn: 'Сохранить трек в медиатеку',
+      savingTrack: 'Сохранение трека...',
+      savedInLibrary: 'В медиатеке',
+      toastTrackSaved: 'Трек сохранён в вашу медиатеку!',
     },
     library: {
       title: 'Библиотека',
@@ -380,6 +384,10 @@ export const translations = {
       syncedLyrics: 'Synchronized lyrics',
       retryLyrics: 'Retry search',
       syncLyrics: 'To current line',
+      saveTrackBtn: 'Save track to library',
+      savingTrack: 'Saving track...',
+      savedInLibrary: 'In library',
+      toastTrackSaved: 'Track saved to your library!',
     },
     library: {
       title: 'Library',

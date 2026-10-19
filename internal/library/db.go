@@ -244,6 +244,35 @@ func (l *DB) GetTrackByPath(filePath string) (*Track, error) {
 	return t, nil
 }
 
+// HasTrack checks whether a track with given filePath or infoHash+fileName already exists in the library.
+func (l *DB) HasTrack(infoHash, filePath string) bool {
+	if filePath == "" && infoHash == "" {
+		return false
+	}
+	base := filepath.Base(filePath)
+	var count int
+	_ = l.db.QueryRow(`
+		SELECT COUNT(1) FROM tracks
+		WHERE file_path = ? OR file_path LIKE ? OR (info_hash != '' AND info_hash = ? AND (file_name = ? OR file_path = ?))`,
+		filePath, "%"+base, infoHash, base, filePath).Scan(&count)
+	return count > 0
+}
+
+// FindTrackByFileName returns a track matching the given filename.
+func (l *DB) FindTrackByFileName(fileName string) (*Track, error) {
+	row := l.db.QueryRow(`
+		SELECT id, info_hash, file_path, file_name, title, artist, album,
+		       year, genre, duration_sec, size_bytes, cover_path, favourite, added_at
+		FROM tracks WHERE file_name = ? LIMIT 1`, fileName)
+	t := &Track{}
+	err := row.Scan(&t.ID, &t.InfoHash, &t.FilePath, &t.FileName, &t.Title, &t.Artist, &t.Album,
+		&t.Year, &t.Genre, &t.DurationSec, &t.SizeByes, &t.CoverPath, &t.Favourite, &t.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
 // UpdateTrackDuration updates duration_sec for a track.
 func (l *DB) UpdateTrackDuration(id int64, durationSec float64) error {
 	_, err := l.db.Exec(`UPDATE tracks SET duration_sec = ? WHERE id = ?`, durationSec, id)

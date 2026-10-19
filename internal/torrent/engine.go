@@ -957,6 +957,112 @@ func (e *Engine) OpenFileReader(infoHash, fileName string) (io.ReadSeekCloser, e
 	return nil, fmt.Errorf("file %q not found in torrent %s", fileName, infoHash)
 }
 
+// ExportStreamedFile ensures that a specific file from a torrent is completely downloaded
+// and copied to the user's destination directory.
+func (e *Engine) ExportStreamedFile(infoHash, fileName, destDir string, timeout time.Duration) (string, error) {
+	if destDir == "" {
+		destDir = e.exportDir
+	}
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+
+	infoHashLower := strings.ToLower(infoHash)
+	infoHashUpper := strings.ToUpper(infoHash)
+
+	e.mu.RLock()
+	var t *torrent.Torrent
+	if mt, ok := e.torrents[infoHashLower]; ok && mt.T != nil {
+		t = mt.T
+	} else if mt, ok := e.torrents[infoHashUpper]; ok && mt.T != nil {
+		t = mt.T
+	} else if mt, ok := e.torrents[infoHash]; ok && mt.T != nil {
+		t = mt.T
+	} else if pt, ok := e.pendingTorrents[infoHashLower]; ok && pt != nil {
+		t = pt
+	} else if pt, ok := e.pendingTorrents[infoHashUpper]; ok && pt != nil {
+		t = pt
+	} else if pt, ok := e.pendingTorrents[infoHash]; ok && pt != nil {
+		t = pt
+	}
+	e.mu.RUnlock()
+
+	if t == nil {
+		return "", fmt.Errorf("torrent %s not found", infoHash)
+	}
+
+	t.AllowDataDownload()
+	t.AllowDataUpload()
+	t.AddTrackers(defaultPublicTrackers)
+
+	normTarget := normalizeRelPath(fileName)
+	baseTarget := filepath.Base(normTarget)
+
+	var targetFile *torrent.File
+	for _, f := range t.Files() {
+		fNorm := normalizeRelPath(f.Path())
+		fBase := filepath.Base(fNorm)
+		if fNorm == normTarget || fBase == baseTarget || f.Path() == fileName || filepath.Base(f.Path()) == fileName {
+			targetFile = f
+			break
+		}
+	}
+
+	if targetFile == nil {
+		return "", fmt.Errorf("file %q not found in torrent %s", fileName, infoHash)
+	}
+
+	dst := filepath.Join(destDir, targetFile.Path())
+	if fi, err := os.Stat(dst); err == nil && fi.Size() >= targetFile.Length() && targetFile.Length() > 0 {
+		return dst, nil
+	}
+
+	// Prioritize all pieces of this file with highest urgency
+	targetFile.SetPriority(torrent.PiecePriorityNow)
+	targetFile.Download()
+
+	begin := targetFile.BeginPieceIndex()
+	end := targetFile.EndPieceIndex()
+	for i := begin; i < end; i++ {
+		t.Piece(i).SetPriority(torrent.PiecePriorityNow)
+	}
+
+	// Wait until file download completes or timeout expires
+	deadline := time.Now().Add(timeout)
+	for targetFile.BytesCompleted() < targetFile.Length() && targetFile.Length() > 0 {
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timeout waiting for file download to complete (%d/%d bytes)", targetFile.BytesCompleted(), targetFile.Length())
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	src := filepath.Join(e.cacheDir, targetFile.Path())
+	if fi, err := os.Stat(src); err != nil || (targetFile.Length() > 0 && fi.Size() < targetFile.Length()) {
+		return "", fmt.Errorf("cached file not ready on disk: %w", err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		return "", fmt.Errorf("failed to copy file to destination: %w", err)
+	}
+
+	// Also attempt to copy any completed album art in the torrent folder
+	targetDir := filepath.Dir(targetFile.Path())
+	for _, f := range t.Files() {
+		if f.Length() > 0 && f.BytesCompleted() == f.Length() {
+			fExt := strings.ToLower(filepath.Ext(f.Path()))
+			if fExt == ".jpg" || fExt == ".jpeg" || fExt == ".png" || fExt == ".webp" {
+				if filepath.Dir(f.Path()) == targetDir || targetDir == "." {
+					imgSrc := filepath.Join(e.cacheDir, f.Path())
+					imgDst := filepath.Join(destDir, f.Path())
+					_ = copyFile(imgSrc, imgDst)
+				}
+			}
+		}
+	}
+
+	return dst, nil
+}
+
 // GetProgress returns download/upload progress accurately calculated for selected files,
 // and automatically exports completed selected files to the user's Music/TorrentPlayer directory.
 func (e *Engine) GetProgress() []DownloadProgress {

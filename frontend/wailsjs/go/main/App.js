@@ -134,6 +134,14 @@ export function ImportTrackToLibrary(arg1, arg2) {
   return window['go']['main']['App']['ImportTrackToLibrary'](arg1, arg2);
 }
 
+export function IsCurrentTrackSaved() {
+  return window['go']['main']['App']['IsCurrentTrackSaved']();
+}
+
+export function SaveCurrentStreamedTrack() {
+  return window['go']['main']['App']['SaveCurrentStreamedTrack']();
+}
+
 export function ListPlaylists() {
   return window['go']['main']['App']['ListPlaylists']();
 }

@@ -1,13 +1,27 @@
 <script lang="ts" setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { usePlayerStore } from '../store/player'
+import { useDialogStore } from '../store/dialog'
 import { useI18n } from '../i18n'
 import { GetLyrics } from '../../wailsjs/go/main/App'
 import { parseLRC, type LyricLine } from '../utils/lrc'
 
 const player = usePlayerStore()
+const dialog = useDialogStore()
 const { t } = useI18n()
 const s = computed(() => player.status)
+
+async function handleSaveTrack() {
+  if (player.isCurrentSaved || player.isSavingTrack) return
+  try {
+    const ok = await player.saveCurrentTrack()
+    if (ok) {
+      dialog.toast(t('player.toastTrackSaved'), 'success')
+    }
+  } catch (err: any) {
+    dialog.toast(err?.message || String(err), 'error')
+  }
+}
 
 const showLyrics = ref<boolean>(true)
 
@@ -379,6 +393,24 @@ onUnmounted(() => {
             <h1 class="fs-title" :title="displayTitle">{{ displayTitle }}</h1>
             <div class="fs-artist" :title="displayArtist">{{ displayArtist }}</div>
             <div class="fs-album" v-if="displayAlbum" :title="displayAlbum">{{ displayAlbum }}</div>
+
+            <!-- Save Streamed Track Button -->
+            <button
+              v-if="s.track && s.state !== 'stopped'"
+              class="fs-save-stream-btn"
+              :class="{
+                'is-saved': player.isCurrentSaved,
+                'is-saving': player.isSavingTrack,
+                'can-save': !player.isCurrentSaved
+              }"
+              :disabled="player.isCurrentSaved || player.isSavingTrack"
+              @click="handleSaveTrack"
+              :title="player.isCurrentSaved ? t('player.savedInLibrary') : (player.isSavingTrack ? t('player.savingTrack') : t('player.saveTrackBtn'))"
+            >
+              <span v-if="player.isSavingTrack" class="btn-spinner">⏳ {{ t('player.savingTrack') }}</span>
+              <span v-else-if="player.isCurrentSaved" class="btn-check">✓ {{ t('player.savedInLibrary') }}</span>
+              <span v-else class="btn-save-content">💾 {{ t('player.saveTrackBtn') }}</span>
+            </button>
           </div>
         </div>
 
@@ -1311,5 +1343,48 @@ onUnmounted(() => {
   .fs-volume-wrap {
     display: none;
   }
+}
+
+/* Save Streamed Track Button in Fullscreen */
+.fs-save-stream-btn {
+  margin-top: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+}
+
+.fs-save-stream-btn.can-save:hover {
+  background: rgba(29, 185, 84, 0.22);
+  border-color: var(--accent);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(29, 185, 84, 0.25);
+}
+
+.fs-save-stream-btn.is-saved {
+  background: rgba(29, 185, 84, 0.15);
+  border-color: rgba(29, 185, 84, 0.4);
+  color: var(--accent);
+  cursor: default;
+}
+
+.fs-save-stream-btn.is-saving {
+  cursor: wait;
+}
+
+.btn-save-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 </style>
