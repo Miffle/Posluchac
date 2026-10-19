@@ -67,6 +67,25 @@ export namespace audio {
 
 export namespace library {
 	
+	export class Folder {
+	    id: number;
+	    path: string;
+	    isDefault: boolean;
+	    // Go type: time
+	    addedAt: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new Folder(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.path = source["path"];
+	        this.isDefault = source["isDefault"];
+	        this.addedAt = source["addedAt"];
+	    }
+	}
 	export class Track {
 	    id: number;
 	    infoHash: string;

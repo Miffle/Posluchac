@@ -1,8 +1,25 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { GetDownloadDir, OpenDownloadFolder, GetTorrentSpeedLimits, SetTorrentSpeedLimits } from '../../wailsjs/go/main/App'
+import {
+  GetDownloadDir,
+  OpenDownloadFolder,
+  GetTorrentSpeedLimits,
+  SetTorrentSpeedLimits,
+  GetLibraryFolders,
+  AddLibraryFolder,
+  RemoveLibraryFolder,
+  ChooseLibraryFolderDialog,
+  ScanLibrary
+} from '../../wailsjs/go/main/App'
 
 export type Language = 'ru' | 'en'
+
+export interface LibraryFolder {
+  id: number
+  path: string
+  isDefault: boolean
+  addedAt?: string
+}
 
 export const useSettingsStore = defineStore('settings', () => {
   const savedLang = (localStorage.getItem('posluchac_lang') as Language) || 'ru'
@@ -10,6 +27,8 @@ export const useSettingsStore = defineStore('settings', () => {
   const downloadDir = ref<string>('')
   const downloadLimitKBps = ref<number>(0)
   const uploadLimitKBps = ref<number>(0)
+  const libraryFolders = ref<LibraryFolder[]>([])
+  const isScanning = ref<boolean>(false)
 
   function setLanguage(lang: Language) {
     language.value = lang
@@ -54,15 +73,61 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  async function loadLibraryFolders() {
+    try {
+      const res = await GetLibraryFolders()
+      libraryFolders.value = (res || []) as LibraryFolder[]
+    } catch {
+      // ignore
+    }
+  }
+
+  async function addFolderDialog(): Promise<boolean> {
+    try {
+      const path = await ChooseLibraryFolderDialog()
+      if (!path) return false
+      await AddLibraryFolder(path)
+      await loadLibraryFolders()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  async function removeFolder(id: number, removeTracks: boolean) {
+    try {
+      await RemoveLibraryFolder(id, removeTracks)
+      await loadLibraryFolders()
+    } catch {
+      // ignore
+    }
+  }
+
+  async function rescanLibrary(): Promise<number> {
+    isScanning.value = true
+    try {
+      const count = await ScanLibrary()
+      return count
+    } finally {
+      isScanning.value = false
+    }
+  }
+
   return {
     language,
     downloadDir,
     downloadLimitKBps,
     uploadLimitKBps,
+    libraryFolders,
+    isScanning,
     setLanguage,
     loadDownloadDir,
     openFolder,
     loadSpeedLimits,
     setSpeedLimits,
+    loadLibraryFolders,
+    addFolderDialog,
+    removeFolder,
+    rescanLibrary,
   }
 })

@@ -5,6 +5,7 @@ package library
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,6 +36,14 @@ type Playlist struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"createdAt"`
 	Tracks    []Track   `json:"tracks,omitempty"`
+}
+
+// Folder represents a registered directory indexed by the library.
+type Folder struct {
+	ID        int64     `json:"id"`
+	Path      string    `json:"path"`
+	IsDefault bool      `json:"isDefault"`
+	AddedAt   time.Time `json:"addedAt"`
 }
 
 // DB wraps a SQLite database for library operations.
@@ -91,6 +100,13 @@ func (l *DB) migrate() error {
 		track_id    INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
 		position    INTEGER NOT NULL,
 		PRIMARY KEY (playlist_id, track_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS library_folders (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		path       TEXT NOT NULL UNIQUE,
+		is_default INTEGER DEFAULT 0,
+		added_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tracks_info_hash ON tracks(info_hash);
@@ -413,6 +429,92 @@ func (l *DB) FindTrackByTitleArtist(title, artist string) (*Track, error) {
 		return nil, err
 	}
 	return t, nil
+}
+
+// AddFolder adds a new library folder to scan.
+func (l *DB) AddFolder(path string, isDefault bool) (int64, error) {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" {
+		return 0, fmt.Errorf("empty folder path")
+	}
+	defVal := 0
+	if isDefault {
+		defVal = 1
+	}
+	res, err := l.db.Exec(`
+		INSERT INTO library_folders (path, is_default)
+		VALUES (?, ?)
+		ON CONFLICT(path) DO UPDATE SET is_default = CASE WHEN excluded.is_default = 1 THEN 1 ELSE library_folders.is_default END
+	`, path, defVal)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// RemoveFolder removes a library folder by ID.
+func (l *DB) RemoveFolder(id int64) (string, error) {
+	var folderPath string
+	var isDefault int
+	err := l.db.QueryRow(`SELECT path, is_default FROM library_folders WHERE id = ?`, id).Scan(&folderPath, &isDefault)
+	if err != nil {
+		return "", err
+	}
+	if isDefault == 1 {
+		return "", fmt.Errorf("cannot remove default library folder")
+	}
+	_, err = l.db.Exec(`DELETE FROM library_folders WHERE id = ?`, id)
+	return folderPath, err
+}
+
+// GetFolder returns a library folder by ID.
+func (l *DB) GetFolder(id int64) (*Folder, error) {
+	var f Folder
+	var isDef int
+	err := l.db.QueryRow(`SELECT id, path, is_default, added_at FROM library_folders WHERE id = ?`, id).Scan(&f.ID, &f.Path, &isDef, &f.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	f.IsDefault = (isDef == 1)
+	return &f, nil
+}
+
+// ListFolders returns all registered library folders.
+func (l *DB) ListFolders() ([]Folder, error) {
+	rows, err := l.db.Query(`SELECT id, path, is_default, added_at FROM library_folders ORDER BY is_default DESC, added_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var folders []Folder
+	for rows.Next() {
+		var f Folder
+		var isDef int
+		if err := rows.Scan(&f.ID, &f.Path, &isDef, &f.AddedAt); err != nil {
+			return nil, err
+		}
+		f.IsDefault = (isDef == 1)
+		folders = append(folders, f)
+	}
+	return folders, nil
+}
+
+// DeleteTracksInFolder removes all tracks belonging to a folder path from the library database.
+func (l *DB) DeleteTracksInFolder(folderPath string) error {
+	folderPath = filepath.Clean(folderPath)
+	sep := string(filepath.Separator)
+	prefix := folderPath
+	if !strings.HasSuffix(prefix, sep) {
+		prefix += sep
+	}
+	_, _ = l.db.Exec(`
+		DELETE FROM playlist_tracks WHERE track_id IN (
+			SELECT id FROM tracks WHERE file_path LIKE ? || '%'
+		)
+	`, prefix)
+	_, err := l.db.Exec(`DELETE FROM tracks WHERE file_path LIKE ? || '%'`, prefix)
+	return err
 }
 
 // Close closes the database connection.

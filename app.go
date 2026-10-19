@@ -93,6 +93,7 @@ func (a *App) startup(ctx context.Context) {
 
 	var sqlDB *sql.DB
 	if a.library != nil {
+		_, _ = a.library.AddFolder(dlDir, true)
 		sqlDB = a.library.SQLDB()
 		var sErr error
 		a.sources, sErr = sources.NewManager(sqlDB)
@@ -1093,65 +1094,125 @@ func (a *App) ScanLibrary() (int, error) {
 		}
 	}
 
-	// 2. Scan for new and completed audio files
+	// 2. Scan for new and completed audio files across all registered library folders
+	folders, _ := a.library.ListFolders()
+	var folderPaths []string
+	for _, f := range folders {
+		folderPaths = append(folderPaths, f.Path)
+	}
+	if len(folderPaths) == 0 {
+		folderPaths = []string{a.downloadDir}
+	}
+
 	count := 0
-	err = filepath.WalkDir(a.downloadDir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() {
+	for _, fPath := range folderPaths {
+		if _, statErr := os.Stat(fPath); os.IsNotExist(statErr) {
+			continue
+		}
+		_ = filepath.WalkDir(fPath, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil || d.IsDir() {
+				return nil
+			}
+
+			if !isAudioExtension(path) {
+				return nil
+			}
+
+			fi, err := d.Info()
+			if err != nil || fi.Size() == 0 {
+				return nil
+			}
+
+			// Read ID3 or FLAC metadata
+			tags, _ := metadata.ReadFile(path)
+			if tags == nil {
+				tags = &metadata.Tags{}
+			}
+
+			fileName := filepath.Base(path)
+			artist, album, title, year := parseSmartAudioInfo(fPath, path, tags)
+
+			var durationSec float64
+			if ex, exists := existingByPath[path]; exists && ex.DurationSec > 0 {
+				durationSec = ex.DurationSec
+			} else {
+				durationSec = audio.GetFileDuration(path)
+			}
+
+			coverPath := findCoverInDir(filepath.Dir(path))
+			if coverPath == "" && tags != nil && len(tags.CoverData) > 0 {
+				coverPath, _ = metadata.SaveCover(tags, path)
+			}
+
+			track := library.Track{
+				InfoHash:    "local",
+				FilePath:    path,
+				FileName:    fileName,
+				Title:       title,
+				Artist:      artist,
+				Album:       album,
+				Year:        year,
+				Genre:       tags.Genre,
+				SizeByes:    fi.Size(),
+				DurationSec: durationSec,
+				CoverPath:   coverPath,
+			}
+
+			_, addErr := a.library.AddTrack(track)
+			if addErr == nil {
+				count++
+			}
 			return nil
-		}
+		})
+	}
 
-		if !isAudioExtension(path) {
-			return nil
-		}
+	return count, nil
+}
 
-		fi, err := d.Info()
-		if err != nil || fi.Size() == 0 {
-			return nil
-		}
+// GetLibraryFolders returns all registered music library directories.
+func (a *App) GetLibraryFolders() ([]library.Folder, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+	return a.library.ListFolders()
+}
 
-		// Read ID3 or FLAC metadata
-		tags, _ := metadata.ReadFile(path)
-		if tags == nil {
-			tags = &metadata.Tags{}
-		}
+// AddLibraryFolder registers a directory for scanning into the music library.
+func (a *App) AddLibraryFolder(path string) (*library.Folder, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+	id, err := a.library.AddFolder(path, false)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		_, _ = a.ScanLibrary()
+	}()
+	return a.library.GetFolder(id)
+}
 
-		fileName := filepath.Base(path)
-		artist, album, title, year := parseSmartAudioInfo(a.downloadDir, path, tags)
+// RemoveLibraryFolder removes a folder from library scanning.
+// If removeTracks is true, tracks from this folder are also deleted from the library.
+func (a *App) RemoveLibraryFolder(id int64, removeTracks bool) error {
+	if a.library == nil {
+		return fmt.Errorf("library not initialized")
+	}
+	folderPath, err := a.library.RemoveFolder(id)
+	if err != nil {
+		return err
+	}
+	if removeTracks && folderPath != "" {
+		_ = a.library.DeleteTracksInFolder(folderPath)
+	}
+	return nil
+}
 
-		var durationSec float64
-		if ex, exists := existingByPath[path]; exists && ex.DurationSec > 0 {
-			durationSec = ex.DurationSec
-		} else {
-			durationSec = audio.GetFileDuration(path)
-		}
-
-		coverPath := findCoverInDir(filepath.Dir(path))
-		if coverPath == "" && tags != nil && len(tags.CoverData) > 0 {
-			coverPath, _ = metadata.SaveCover(tags, path)
-		}
-
-		track := library.Track{
-			InfoHash:    "local",
-			FilePath:    path,
-			FileName:    fileName,
-			Title:       title,
-			Artist:      artist,
-			Album:       album,
-			Year:        year,
-			Genre:       tags.Genre,
-			SizeByes:    fi.Size(),
-			DurationSec: durationSec,
-			CoverPath:   coverPath,
-		}
-
-		_, addErr := a.library.AddTrack(track)
-		if addErr == nil {
-			count++
-		}
-		return nil
+// ChooseLibraryFolderDialog opens the system folder selection dialog.
+func (a *App) ChooseLibraryFolderDialog() (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Выберите папку с музыкой / Select Music Folder",
 	})
-
-	return count, err
 }
 
 // parseSmartAudioInfo extracts artist, album, title and year from metadata tags or from file path and naming heuristics.

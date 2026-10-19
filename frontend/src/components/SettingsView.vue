@@ -1,18 +1,21 @@
 <script lang="ts" setup>
 import { onMounted, computed, ref } from 'vue'
-import { useSettingsStore, type Language } from '../store/settings'
+import { useSettingsStore, type Language, type LibraryFolder } from '../store/settings'
 import { useUpdaterStore } from '../store/updater'
+import { useDialogStore } from '../store/dialog'
 import { useI18n } from '../i18n'
 import { OpenExternalURL } from '../../wailsjs/go/main/App'
 
 const settings = useSettingsStore()
 const updater = useUpdaterStore()
+const dialog = useDialogStore()
 const { t } = useI18n()
 
 const customDlInput = ref('')
 const customUlInput = ref('')
 const isCustomDl = ref(false)
 const isCustomUl = ref(false)
+const rescanMessage = ref('')
 
 const dlPresets = computed(() => [
   { value: 0, label: t('settings.unlimited') },
@@ -33,8 +36,39 @@ const ulPresets = computed(() => [
 onMounted(async () => {
   settings.loadDownloadDir()
   await settings.loadSpeedLimits()
+  await settings.loadLibraryFolders()
   syncCustomInputs()
 })
+
+async function handleAddFolder() {
+  const added = await settings.addFolderDialog()
+  if (added) {
+    await handleRescan()
+  }
+}
+
+async function confirmRemoveFolder(folder: LibraryFolder) {
+  const selected = await dialog.choice({
+    title: t('settings.removeFolderTitle'),
+    message: t('settings.removeFolderMsg', { path: folder.path }),
+    options: [
+      { label: t('settings.removeFolderDeleteTracks'), value: 'delete_tracks', danger: true },
+      { label: t('settings.removeFolderKeepTracks'), value: 'keep_tracks', primary: true }
+    ]
+  })
+  if (!selected) return
+  await settings.removeFolder(folder.id, selected === 'delete_tracks')
+}
+
+async function handleRescan() {
+  rescanMessage.value = ''
+  try {
+    const count = await settings.rescanLibrary()
+    rescanMessage.value = t('settings.rescanDone', { count })
+  } catch (e: any) {
+    dialog.toast(e?.message || String(e), 'error')
+  }
+}
 
 function syncCustomInputs() {
   const currentDl = settings.downloadLimitKBps
@@ -166,7 +200,60 @@ function openGithub() {
         </div>
       </section>
 
-      <!-- 3. BitTorrent Bandwidth Limits -->
+      <!-- 3. Library Folders Section -->
+      <section class="settings-card">
+        <div class="card-header">
+          <div class="card-icon">📚</div>
+          <div>
+            <h2 class="card-title">{{ t('settings.foldersTitle') }}</h2>
+            <p class="card-desc">{{ t('settings.foldersDesc') }}</p>
+          </div>
+        </div>
+
+        <div class="folders-list">
+          <div
+            v-for="folder in settings.libraryFolders"
+            :key="folder.id"
+            class="folder-item"
+          >
+            <div class="folder-path-wrap">
+              <span class="folder-icon">📁</span>
+              <span class="folder-path" :title="folder.path">{{ folder.path }}</span>
+              <span v-if="folder.isDefault" class="folder-badge-default">{{ t('settings.defaultFolderBadge') }}</span>
+            </div>
+            <button
+              v-if="!folder.isDefault"
+              class="folder-delete-btn"
+              :title="t('common.delete')"
+              @click="confirmRemoveFolder(folder)"
+            >
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="folders-actions">
+          <button class="action-btn" @click="handleAddFolder">
+            <span>{{ t('settings.addFolderBtn') }}</span>
+          </button>
+          <button
+            class="secondary-btn"
+            @click="handleRescan"
+            :disabled="settings.isScanning"
+          >
+            <span :class="['btn-icon', { spinning: settings.isScanning }]">🔄</span>
+            <span>{{ settings.isScanning ? t('settings.rescanning') : t('settings.rescanBtn') }}</span>
+          </button>
+        </div>
+
+        <div v-if="rescanMessage" class="rescan-status-box">
+          {{ rescanMessage }}
+        </div>
+      </section>
+
+      <!-- 4. BitTorrent Bandwidth Limits -->
       <section class="settings-card">
         <div class="card-header">
           <div class="card-icon">⚡</div>
@@ -689,5 +776,93 @@ function openGithub() {
 
 .action-btn-sm:hover {
   opacity: 0.9;
+}
+
+/* Library Folders */
+.folders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.folder-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.folder-path-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.folder-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.folder-path {
+  font-size: 13px;
+  color: var(--text);
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-badge-default {
+  background: rgba(29, 185, 84, 0.15);
+  color: var(--accent);
+  border: 1px solid rgba(29, 185, 84, 0.3);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.folder-delete-btn {
+  background: transparent;
+  border: none;
+  color: var(--text2);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.folder-delete-btn:hover {
+  color: #ff6b6b;
+  background: rgba(231, 76, 60, 0.1);
+}
+
+.folders-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.rescan-status-box {
+  margin-top: 14px;
+  padding: 8px 12px;
+  background: rgba(29, 185, 84, 0.1);
+  color: var(--accent);
+  border-radius: 6px;
+  font-size: 13px;
 }
 </style>

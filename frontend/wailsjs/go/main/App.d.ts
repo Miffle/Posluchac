@@ -13,6 +13,8 @@ export function AddFromResult(arg1:search.Result):Promise<string>;
 
 export function AddFromResultPending(arg1:search.Result):Promise<main.PendingTorrent>;
 
+export function AddLibraryFolder(arg1:string):Promise<library.Folder>;
+
 export function AddMagnet(arg1:string):Promise<string>;
 
 export function AddSource(arg1:string):Promise<sources.Source>;
@@ -28,6 +30,8 @@ export function ApplyUpdate(arg1:string):Promise<void>;
 export function CancelPendingTorrent(arg1:string):Promise<void>;
 
 export function CheckForUpdates():Promise<updater.UpdateInfo>;
+
+export function ChooseLibraryFolderDialog():Promise<string>;
 
 export function CreatePlaylist(arg1:string):Promise<number>;
 
@@ -50,6 +54,8 @@ export function GetDownloadDir():Promise<string>;
 export function GetFavourites():Promise<Array<library.Track>>;
 
 export function GetLibrary():Promise<Array<library.Track>>;
+
+export function GetLibraryFolders():Promise<Array<library.Folder>>;
 
 export function GetLyrics(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string,arg6:boolean):Promise<lyrics.Result>;
 
@@ -90,6 +96,8 @@ export function PauseTorrent(arg1:string):Promise<void>;
 export function PlayTrack(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveFromPlaylist(arg1:number,arg2:number):Promise<void>;
+
+export function RemoveLibraryFolder(arg1:number,arg2:boolean):Promise<void>;
 
 export function RemoveTorrent(arg1:string,arg2:boolean):Promise<void>;
 

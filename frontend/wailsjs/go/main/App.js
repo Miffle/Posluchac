@@ -10,6 +10,10 @@ export function AddFromResultPending(arg1) {
   return window['go']['main']['App']['AddFromResultPending'](arg1);
 }
 
+export function AddLibraryFolder(arg1) {
+  return window['go']['main']['App']['AddLibraryFolder'](arg1);
+}
+
 export function AddMagnet(arg1) {
   return window['go']['main']['App']['AddMagnet'](arg1);
 }
@@ -40,6 +44,10 @@ export function CancelPendingTorrent(arg1) {
 
 export function CheckForUpdates() {
   return window['go']['main']['App']['CheckForUpdates']();
+}
+
+export function ChooseLibraryFolderDialog() {
+  return window['go']['main']['App']['ChooseLibraryFolderDialog']();
 }
 
 export function CreatePlaylist(arg1) {
@@ -84,6 +92,10 @@ export function GetFavourites() {
 
 export function GetLibrary() {
   return window['go']['main']['App']['GetLibrary']();
+}
+
+export function GetLibraryFolders() {
+  return window['go']['main']['App']['GetLibraryFolders']();
 }
 
 export function GetLyrics(arg1, arg2, arg3, arg4, arg5, arg6) {
@@ -164,6 +176,10 @@ export function PlayTrack(arg1, arg2) {
 
 export function RemoveFromPlaylist(arg1, arg2) {
   return window['go']['main']['App']['RemoveFromPlaylist'](arg1, arg2);
+}
+
+export function RemoveLibraryFolder(arg1, arg2) {
+  return window['go']['main']['App']['RemoveLibraryFolder'](arg1, arg2);
 }
 
 export function RemoveTorrent(arg1, arg2) {
