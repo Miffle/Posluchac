@@ -49,6 +49,10 @@ export function GetAppVersion():Promise<string>;
 
 export function GetCover(arg1:string):Promise<string>;
 
+export function GetDiscordRPCEnabled():Promise<boolean>;
+
+export function SetDiscordRPCEnabled(arg1:boolean):Promise<void>;
+
 export function GetDownloadDir():Promise<string>;
 
 export function GetFavourites():Promise<Array<library.Track>>;

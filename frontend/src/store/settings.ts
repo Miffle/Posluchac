@@ -9,7 +9,9 @@ import {
   AddLibraryFolder,
   RemoveLibraryFolder,
   ChooseLibraryFolderDialog,
-  ScanLibrary
+  ScanLibrary,
+  GetDiscordRPCEnabled,
+  SetDiscordRPCEnabled
 } from '../../wailsjs/go/main/App'
 
 export type Language = 'ru' | 'en'
@@ -29,10 +31,28 @@ export const useSettingsStore = defineStore('settings', () => {
   const uploadLimitKBps = ref<number>(0)
   const libraryFolders = ref<LibraryFolder[]>([])
   const isScanning = ref<boolean>(false)
+  const discordRPCEnabled = ref<boolean>(true)
 
   function setLanguage(lang: Language) {
     language.value = lang
     localStorage.setItem('posluchac_lang', lang)
+  }
+
+  async function loadDiscordRPC() {
+    try {
+      discordRPCEnabled.value = await GetDiscordRPCEnabled()
+    } catch {
+      // ignore
+    }
+  }
+
+  async function setDiscordRPC(enabled: boolean) {
+    discordRPCEnabled.value = enabled
+    try {
+      await SetDiscordRPCEnabled(enabled)
+    } catch {
+      // ignore
+    }
   }
 
   async function loadDownloadDir() {
@@ -120,6 +140,7 @@ export const useSettingsStore = defineStore('settings', () => {
     uploadLimitKBps,
     libraryFolders,
     isScanning,
+    discordRPCEnabled,
     setLanguage,
     loadDownloadDir,
     openFolder,
@@ -129,5 +150,7 @@ export const useSettingsStore = defineStore('settings', () => {
     addFolderDialog,
     removeFolder,
     rescanLibrary,
+    loadDiscordRPC,
+    setDiscordRPC,
   }
 })

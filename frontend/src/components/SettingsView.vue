@@ -37,6 +37,7 @@ onMounted(async () => {
   settings.loadDownloadDir()
   await settings.loadSpeedLimits()
   await settings.loadLibraryFolders()
+  await settings.loadDiscordRPC()
   syncCustomInputs()
 })
 
@@ -336,7 +337,30 @@ function openGithub() {
         </div>
       </section>
 
-      <!-- 4. About Section -->
+      <!-- 5. Discord Rich Presence Section -->
+      <section class="settings-card">
+        <div class="card-header">
+          <div class="card-icon">🎮</div>
+          <div>
+            <h2 class="card-title">{{ t('settings.discordTitle') }}</h2>
+            <p class="card-desc">{{ t('settings.discordDesc') }}</p>
+          </div>
+        </div>
+
+        <div class="toggle-row">
+          <span class="toggle-label">{{ t('settings.discordToggle') }}</span>
+          <label class="switch">
+            <input
+              type="checkbox"
+              :checked="settings.discordRPCEnabled"
+              @change="settings.setDiscordRPC(($event.target as HTMLInputElement).checked)"
+            />
+            <span class="slider round"></span>
+          </label>
+        </div>
+      </section>
+
+      <!-- 6. About Section -->
       <section class="settings-card">
         <div class="card-header">
           <div class="card-icon">ℹ️</div>
@@ -864,5 +888,73 @@ function openGithub() {
   color: var(--accent);
   border-radius: 6px;
   font-size: 13px;
+}
+
+/* Toggle Switch for Discord RPC */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.toggle-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--surface2);
+  transition: 0.25s ease;
+  border-radius: 26px;
+  border: 1px solid var(--border);
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #ffffff;
+  transition: 0.25s ease;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+input:checked + .slider {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+input:checked + .slider:before {
+  transform: translateX(22px);
+  background-color: #000000;
 }
 </style>

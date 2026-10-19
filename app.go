@@ -19,6 +19,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/user/torrent-player/internal/audio"
+	"github.com/user/torrent-player/internal/discord"
 	"github.com/user/torrent-player/internal/hotkeys"
 	"github.com/user/torrent-player/internal/library"
 	"github.com/user/torrent-player/internal/lyrics"
@@ -43,6 +44,7 @@ type App struct {
 	rutracker    *search.RutrackerSearcher
 	lyrics       *lyrics.Client
 	hotkeys      *hotkeys.Manager
+	discord      *discord.Client
 	dataDir      string
 	downloadDir  string
 	readySources chan struct{}
@@ -71,6 +73,7 @@ func NewApp() *App {
 		dataDir:      dataDir,
 		downloadDir:  dlDir,
 		lyrics:       lyrics.NewClient(),
+		discord:      discord.NewClient(""),
 		readySources: make(chan struct{}),
 	}
 }
@@ -129,6 +132,14 @@ func (a *App) startup(ctx context.Context) {
 	// Start global media hotkeys listener (Fn+F7/F8/F9 etc.)
 	a.hotkeys = hotkeys.Start(a.ctx)
 
+	// Load Discord RPC preferences from app_settings
+	if sqlDB != nil {
+		var rpcEnabledStr string
+		if err := sqlDB.QueryRow(`SELECT value FROM app_settings WHERE key = 'discord_rpc_enabled'`).Scan(&rpcEnabledStr); err == nil {
+			a.discord.SetEnabled(rpcEnabledStr != "false" && rpcEnabledStr != "0")
+		}
+	}
+
 	// Run initial library scan and background watcher for Music/TorrentPlayer
 	go func() {
 		time.Sleep(1 * time.Second)
@@ -148,6 +159,9 @@ func (a *App) shutdown(_ context.Context) {
 	}
 	if a.sources != nil {
 		a.sources.Stop()
+	}
+	if a.discord != nil {
+		a.discord.Close()
 	}
 	a.player.Stop()
 	a.engine.Close()
@@ -718,24 +732,85 @@ func (a *App) PlayTrack(infoHash, filePath string) error {
 	}
 
 	playErr := a.player.Play(r, ext, track)
-	if playErr == nil && a.library != nil {
-		go func(dp string) {
-			time.Sleep(500 * time.Millisecond)
+	if playErr == nil {
+		go func(dp string, tr audio.TrackInfo) {
+			time.Sleep(300 * time.Millisecond)
 			st := a.player.Status()
-			if st.DurationSec > 0 {
+			if st.DurationSec > 0 && a.library != nil {
 				_ = a.library.UpdateTrackDurationByPath(dp, st.DurationSec)
 			}
-		}(diskPath)
+			a.updateDiscordActivity(&tr, st.PositionSec, st.DurationSec)
+		}(diskPath, track)
 	}
 
 	return playErr
 }
 
 // Pause toggles pause/resume of playback.
-func (a *App) Pause() { a.player.Pause() }
+func (a *App) Pause() {
+	a.player.Pause()
+	st := a.player.Status()
+	if st.State == audio.StatePaused {
+		if a.discord != nil {
+			a.discord.ClearActivity()
+		}
+	} else if st.State == audio.StatePlaying && st.Track != nil {
+		a.updateDiscordActivity(st.Track, st.PositionSec, st.DurationSec)
+	}
+}
 
 // Stop stops playback.
-func (a *App) Stop() { a.player.Stop() }
+func (a *App) Stop() {
+	a.player.Stop()
+	if a.discord != nil {
+		a.discord.ClearActivity()
+	}
+}
+
+// GetDiscordRPCEnabled returns true if Discord Rich Presence is enabled.
+func (a *App) GetDiscordRPCEnabled() bool {
+	if a.discord == nil {
+		return false
+	}
+	return a.discord.IsEnabled()
+}
+
+// SetDiscordRPCEnabled enables or disables Discord Rich Presence and saves the preference.
+func (a *App) SetDiscordRPCEnabled(enabled bool) error {
+	if a.discord != nil {
+		a.discord.SetEnabled(enabled)
+	}
+	if a.library != nil && a.library.SQLDB() != nil {
+		val := "1"
+		if !enabled {
+			val = "0"
+		}
+		_, _ = a.library.SQLDB().Exec(`
+			INSERT INTO app_settings (key, value) VALUES ('discord_rpc_enabled', ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, val)
+	}
+	if enabled {
+		st := a.player.Status()
+		if st.State == audio.StatePlaying && st.Track != nil {
+			go a.updateDiscordActivity(st.Track, st.PositionSec, st.DurationSec)
+		}
+	}
+	return nil
+}
+
+func (a *App) updateDiscordActivity(track *audio.TrackInfo, pos, dur float64) {
+	if a.discord == nil || track == nil {
+		return
+	}
+	_ = a.discord.SetActivity(discord.TrackActivity{
+		Title:       track.Title,
+		Artist:      track.Artist,
+		Album:       track.Album,
+		CoverURL:    track.CoverPath,
+		PositionSec: pos,
+		DurationSec: dur,
+	})
+}
 
 // SeekTo seeks to the given position in seconds.
 func (a *App) SeekTo(seconds float64) error { return a.player.SeekTo(seconds) }

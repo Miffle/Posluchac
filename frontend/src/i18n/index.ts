@@ -51,6 +51,9 @@ export const translations = {
       removeFolderMsg: 'Удалить папку «{path}» из настроек сканирования?',
       removeFolderKeepTracks: 'Оставить треки в медиатеке',
       removeFolderDeleteTracks: 'Удалить треки этой папки из медиатеки',
+      discordTitle: 'Discord Rich Presence (RPC)',
+      discordDesc: 'Трансляция названия играющего трека, альбома, исполнителя и таймлайна в ваш профиль Discord',
+      discordToggle: 'Отображать статус в Discord',
     },
     player: {
       noTrack: 'Нет трека',
@@ -358,6 +361,9 @@ export const translations = {
       removeFolderMsg: 'Remove folder "{path}" from scan settings?',
       removeFolderKeepTracks: 'Keep tracks in library',
       removeFolderDeleteTracks: 'Remove tracks of this folder from library',
+      discordTitle: 'Discord Rich Presence (RPC)',
+      discordDesc: 'Show currently playing song title, album, artist, and timeline in your Discord profile',
+      discordToggle: 'Display status in Discord',
     },
     player: {
       noTrack: 'No track',

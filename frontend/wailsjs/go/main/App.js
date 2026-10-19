@@ -82,6 +82,14 @@ export function GetCover(arg1) {
   return window['go']['main']['App']['GetCover'](arg1);
 }
 
+export function GetDiscordRPCEnabled() {
+  return window['go']['main']['App']['GetDiscordRPCEnabled']();
+}
+
+export function SetDiscordRPCEnabled(arg1) {
+  return window['go']['main']['App']['SetDiscordRPCEnabled'](arg1);
+}
+
 export function GetDownloadDir() {
   return window['go']['main']['App']['GetDownloadDir']();
 }
