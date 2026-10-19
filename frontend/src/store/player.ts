@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { GetStatus, Pause, Stop, SeekTo, SetVolume, PlayTrack, IsCurrentTrackSaved, SaveCurrentStreamedTrack } from '../../wailsjs/go/main/App'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 export interface PlayerStatus {
   state: 'playing' | 'paused' | 'stopped'
@@ -123,7 +124,15 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  let eventsRegistered = false
   function startPolling() {
+    if (!eventsRegistered) {
+      eventsRegistered = true
+      EventsOn('player:ended', () => {
+        handleTrackEnded()
+      })
+    }
+
     pollInterval = setInterval(async () => {
       try {
         if (!volumeInitialized) {
@@ -152,16 +161,28 @@ export const usePlayerStore = defineStore('player', () => {
     }, 500)
   }
 
+  let isHandlingEnd = false
   async function handleTrackEnded() {
-    if (repeatMode.value === 'one' && status.value.track) {
-      // Repeat same song
-      await PlayTrack(status.value.track.infoHash, status.value.track.filePath)
-    } else if (repeatMode.value === 'all' || isShuffled.value) {
-      // Repeat playlist or shuffle: play next
-      await playNext()
-    } else if (currentIndex.value < playlist.value.length - 1) {
-      // Play next song until end of list
-      await playNext()
+    if (isHandlingEnd) return
+    isHandlingEnd = true
+    try {
+      if (repeatMode.value === 'one' && status.value.track) {
+        // Repeat same song
+        await PlayTrack(status.value.track.infoHash, status.value.track.filePath)
+      } else if (repeatMode.value === 'all' || isShuffled.value) {
+        // Repeat playlist or shuffle: play next
+        await playNext()
+      } else if (currentIndex.value < playlist.value.length - 1) {
+        // Play next song until end of list
+        await playNext()
+      } else {
+        // Reached end of playback queue: cleanly stop and reset
+        await stop()
+      }
+    } finally {
+      setTimeout(() => {
+        isHandlingEnd = false
+      }, 300)
     }
   }
 
@@ -262,14 +283,38 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   async function togglePause() {
+    if (status.value.state === 'stopped') {
+      const track = currentQueueTrack.value || status.value.track
+      if (track) {
+        await play(track.infoHash, track.filePath)
+        return
+      }
+      if (playlist.value.length > 0) {
+        currentIndex.value = 0
+        const first = playlist.value[0]
+        await play(first.infoHash, first.filePath)
+        return
+      }
+      return
+    }
     await Pause()
   }
 
   async function stop() {
     await Stop()
+    status.value.state = 'stopped'
+    status.value.positionSec = 0
   }
 
   async function seek(seconds: number) {
+    if (status.value.state === 'stopped') {
+      const track = currentQueueTrack.value || status.value.track
+      if (track) {
+        await play(track.infoHash, track.filePath)
+        await SeekTo(seconds)
+        return
+      }
+    }
     await SeekTo(seconds)
   }
 

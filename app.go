@@ -118,6 +118,15 @@ func (a *App) startup(ctx context.Context) {
 	a.player, err = audio.NewPlayer()
 	if err != nil {
 		fmt.Println("audio player error:", err)
+	} else {
+		a.player.SetOnTrackEnded(func() {
+			if a.discord != nil {
+				a.discord.ClearActivity()
+			}
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "player:ended")
+			}
+		})
 	}
 
 	// Build search backends
@@ -761,7 +770,7 @@ func (a *App) PlayTrack(infoHash, filePath string) error {
 func (a *App) Pause() {
 	a.player.Pause()
 	st := a.player.Status()
-	if st.State == audio.StatePaused {
+	if st.State == audio.StatePaused || st.State == audio.StateStopped {
 		if a.discord != nil {
 			a.discord.ClearActivity()
 		}

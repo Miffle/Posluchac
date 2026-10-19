@@ -22,7 +22,7 @@ const progress = computed(() => {
 })
 
 function onSeekClick(e: MouseEvent) {
-  if (s.value.state === 'stopped' || !s.value.durationSec) return
+  if (!s.value.durationSec) return
   const container = e.currentTarget as HTMLElement
   const bar = container.querySelector('.progress-bar') as HTMLElement
   if (!bar) return
@@ -169,7 +169,7 @@ async function handleSaveTrack() {
         <button
           class="ctrl-btn"
           @click="player.playPrev()"
-          :disabled="s.state === 'stopped'"
+          :disabled="player.playlist.length === 0"
           :title="t('player.prevTrack')"
         >
           ⏮
@@ -179,7 +179,7 @@ async function handleSaveTrack() {
         <button
           class="ctrl-btn play-btn"
           @click="player.togglePause()"
-          :disabled="s.state === 'stopped'"
+          :disabled="player.playlist.length === 0 && !s.track"
           :title="s.state === 'playing' ? t('common.pause') : t('common.play')"
         >
           <svg v-if="s.state === 'playing'" viewBox="0 0 24 24" class="play-svg">
@@ -193,7 +193,7 @@ async function handleSaveTrack() {
         <button
           class="ctrl-btn"
           @click="player.playNext()"
-          :disabled="s.state === 'stopped'"
+          :disabled="player.playlist.length === 0"
           :title="t('player.nextTrack')"
         >
           ⏭
@@ -214,7 +214,7 @@ async function handleSaveTrack() {
       <div
         class="progress-container"
         @click="onSeekClick"
-        :class="{ inactive: s.state === 'stopped' }"
+        :class="{ inactive: !s.durationSec }"
       >
         <span class="time-label">{{ formatTime(s.positionSec) }}</span>
         <div class="progress-bar">

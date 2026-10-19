@@ -256,7 +256,7 @@ const progress = computed(() => {
 })
 
 function onSeekClick(e: MouseEvent) {
-  if (s.value.state === 'stopped' || !s.value.durationSec) return
+  if (!s.value.durationSec) return
   const container = e.currentTarget as HTMLElement
   const bar = container.querySelector('.fs-progress-bar') as HTMLElement
   if (!bar) return
@@ -538,7 +538,7 @@ onUnmounted(() => {
             <button
               class="fs-play-btn"
               @click="player.togglePause"
-              :disabled="s.state === 'stopped' && !player.currentQueueTrack"
+              :disabled="player.playlist.length === 0 && !s.track"
               :title="s.state === 'playing' ? t('common.pause') : t('common.play')"
             >
               <svg v-if="s.state === 'playing'" viewBox="0 0 24 24" class="fs-play-svg">
