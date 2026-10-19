@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/Miffle/Posluchac/releases/latest"><img src="https://img.shields.io/github/v/release/Miffle/Posluchac?color=1db954&style=flat-square" alt="Последний релиз"></a>
+  <a href="https://discord.gg/rQ9vADRJvQ"><img src="https://img.shields.io/badge/Discord-Присоединиться-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
   <img src="https://img.shields.io/badge/платформа-Windows%2010%20%7C%2011-0078D6?style=flat-square&logo=windows" alt="Платформа: Windows">
   <img src="https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Wails-v2-DF1A29?style=flat-square" alt="Wails">
@@ -57,6 +58,11 @@
 * **Сворачивание / закрытие в трей**: приложение продолжает играть в фоне при закрытии окна.
 * **Восстановление по клику**: разворачивание окна по клику левой кнопкой мыши на иконку в области уведомлений.
 * **Нативное контекстное меню**: меню правой кнопки мыши («Открыть Послушак» и «Выйти») для полного и чистого завершения процесса без зависания в диспетчере задач.
+
+### 🎮 Discord Rich Presence (RPC)
+* **Трансляция трека в профиль**: отображение названия песни, исполнителя, альбома и живого таймлайна («Слушает Posluchac») в реальном времени.
+* **Интерактивные кнопки**: быстрый переход к скачиванию плеера и открытию GitHub-репозитория прямо из вашего Discord-статуса.
+* **Работа «из коробки»**: официальный Client ID уже встроен в плеер — не требует создания ботов или настройки Developer Portal. Включается и выключается одним тумблером в Настройках.
 
 ### 🌐 Локализация и обновления
 * **Двуязычный интерфейс (RU / EN)**: полноценный перевод всех экранов, модальных окон и подсказок с переключением на лету в Настройках.
@@ -173,10 +179,18 @@ build/bin/Posluchac.exe
 5. Создайте Pull Request
 
 ---
-## Discord
-Обязательно заходи в дискорд, там появляются уведомления о новых релизах 
 
-**[Сслыка на дискорд](https://discord.gg/rQ9vADRJvQ)**
+## 💬 Сообщество и Discord
+
+Присоединяйтесь к нашему Discord-серверу, чтобы первыми узнавать о свежих релизах, делиться идеями и впечатлениями, сообщать об ошибках и общаться с сообществом:
+
+<p align="center">
+  <a href="https://discord.gg/rQ9vADRJvQ">
+    <img src="https://img.shields.io/badge/Discord-Присоединиться-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord Posluchac">
+  </a>
+</p>
+
+👉 **[Перейти в Discord-сервер Posluchac](https://discord.gg/rQ9vADRJvQ)**
 
 ---
 
