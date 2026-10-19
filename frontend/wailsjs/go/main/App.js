@@ -82,10 +82,6 @@ export function GetCover(arg1) {
   return window['go']['main']['App']['GetCover'](arg1);
 }
 
-export function GetDiscordClientID() {
-  return window['go']['main']['App']['GetDiscordClientID']();
-}
-
 export function GetDiscordRPCEnabled() {
   return window['go']['main']['App']['GetDiscordRPCEnabled']();
 }
@@ -228,10 +224,6 @@ export function SearchLibrary(arg1) {
 
 export function SeekTo(arg1) {
   return window['go']['main']['App']['SeekTo'](arg1);
-}
-
-export function SetDiscordClientID(arg1) {
-  return window['go']['main']['App']['SetDiscordClientID'](arg1);
 }
 
 export function SetDiscordRPCEnabled(arg1) {

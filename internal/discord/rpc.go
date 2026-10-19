@@ -16,7 +16,7 @@ import (
 
 const (
 	// DefaultClientID is the Discord Application ID for Posluchac Rich Presence.
-	DefaultClientID = "1341052684883394590"
+	DefaultClientID = "1561711243608330281"
 	DefaultLogo     = "posluchac_logo"
 	GithubURL       = "https://github.com/Miffle/Posluchac"
 )
@@ -75,24 +75,6 @@ func (c *Client) IsEnabled() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.enabled
-}
-
-// SetClientID updates the Discord Application ID and reconnects if changed.
-func (c *Client) SetClientID(clientID string) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.clientID == clientID {
-		return
-	}
-	c.clientID = clientID
-	_ = c.closeLocked()
-}
-
-// GetClientID returns the currently configured Discord Application ID.
-func (c *Client) GetClientID() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.clientID
 }
 
 // Connect attempts to connect to the Discord IPC pipe.
