@@ -30,6 +30,8 @@ export interface DownloadProgress {
   addedAt?: number
   selectedCount?: number
   selectedTrack?: string
+  downloadLimitKBps?: number
+  uploadLimitKBps?: number
 }
 
 export interface TorrentFile {

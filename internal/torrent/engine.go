@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	"golang.org/x/time/rate"
 )
 
 // TorrentState represents the current state of a managed torrent.
@@ -48,20 +50,22 @@ type ManagedTorrent struct {
 
 // DownloadProgress holds current download/upload stats.
 type DownloadProgress struct {
-	InfoHash      string  `json:"infoHash"`
-	Name          string  `json:"name"`
-	Downloaded    int64   `json:"downloaded"`
-	Total         int64   `json:"total"`
-	PercentDone   float64 `json:"percentDone"`
-	DownloadSpeed float64 `json:"downloadSpeed"`
-	UploadSpeed   float64 `json:"uploadSpeed"`
-	Seeders       int     `json:"seeders"`
-	Peers         int     `json:"peers"`
-	Leechers      int     `json:"leechers"`
-	State         string  `json:"state"`
-	AddedAt       int64   `json:"addedAt"`
-	SelectedCount int     `json:"selectedCount"`
-	SelectedTrack string  `json:"selectedTrack,omitempty"`
+	InfoHash          string  `json:"infoHash"`
+	Name              string  `json:"name"`
+	Downloaded        int64   `json:"downloaded"`
+	Total             int64   `json:"total"`
+	PercentDone       float64 `json:"percentDone"`
+	DownloadSpeed     float64 `json:"downloadSpeed"`
+	UploadSpeed       float64 `json:"uploadSpeed"`
+	Seeders           int     `json:"seeders"`
+	Peers             int     `json:"peers"`
+	Leechers          int     `json:"leechers"`
+	State             string  `json:"state"`
+	AddedAt           int64   `json:"addedAt"`
+	SelectedCount     int     `json:"selectedCount"`
+	SelectedTrack     string  `json:"selectedTrack,omitempty"`
+	DownloadLimitKBps int     `json:"downloadLimitKBps"`
+	UploadLimitKBps   int     `json:"uploadLimitKBps"`
 }
 
 var defaultPublicTrackers = [][]string{
@@ -100,13 +104,17 @@ func injectPublicTrackers(spec *torrent.TorrentSpec) {
 
 // Engine manages all torrent operations.
 type Engine struct {
-	client          *torrent.Client
-	torrents        map[string]*ManagedTorrent
-	pendingTorrents map[string]*torrent.Torrent // preview torrents that are not active downloads
-	mu              sync.RWMutex
-	cacheDir        string // internal raw piece storage
-	exportDir       string // clean user-facing folder (Music/TorrentPlayer)
-	db              *sql.DB
+	client            *torrent.Client
+	torrents          map[string]*ManagedTorrent
+	pendingTorrents   map[string]*torrent.Torrent // preview torrents that are not active downloads
+	mu                sync.RWMutex
+	cacheDir          string // internal raw piece storage
+	exportDir         string // clean user-facing folder (Music/TorrentPlayer)
+	db                *sql.DB
+	downloadLimiter   *rate.Limiter
+	uploadLimiter     *rate.Limiter
+	downloadLimitKBps int
+	uploadLimitKBps   int
 }
 
 // NewEngine creates a new torrent engine and restores any previously active torrents from the database.
@@ -118,12 +126,17 @@ func NewEngine(cacheDir, exportDir string, db *sql.DB) (*Engine, error) {
 		return nil, fmt.Errorf("create export dir: %w", err)
 	}
 
+	downloadLimiter := rate.NewLimiter(rate.Inf, 256*1024)
+	uploadLimiter := rate.NewLimiter(rate.Inf, 256*1024)
+
 	cfg := torrent.NewDefaultClientConfig()
 	// Storage uses internal cacheDir so exportDir NEVER gets polluted with dummy 0-byte unselected files!
 	cfg.DefaultStorage = storage.NewFile(cacheDir)
 	cfg.NoDHT = false
 	cfg.DisablePEX = false
 	cfg.Seed = true
+	cfg.DownloadRateLimiter = downloadLimiter
+	cfg.UploadRateLimiter = uploadLimiter
 
 	client, err := torrent.NewClient(cfg)
 	if err != nil {
@@ -142,11 +155,14 @@ func NewEngine(cacheDir, exportDir string, db *sql.DB) (*Engine, error) {
 		cacheDir:        cacheDir,
 		exportDir:       exportDir,
 		db:              db,
+		downloadLimiter: downloadLimiter,
+		uploadLimiter:   uploadLimiter,
 	}
 
 	if db != nil {
 		e.initDB()
 		e.restoreTorrents()
+		e.restoreSpeedLimits()
 	}
 
 	return e, nil
@@ -161,6 +177,10 @@ func (e *Engine) initDB() {
 		selected_paths TEXT NOT NULL DEFAULT '[]',
 		state TEXT NOT NULL DEFAULT 'downloading',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE TABLE IF NOT EXISTS app_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
 	);
 	DELETE FROM managed_torrents WHERE state = 'queued';
 	`
@@ -204,6 +224,76 @@ func (e *Engine) deleteTorrent(infoHash string) {
 		return
 	}
 	_, _ = e.db.Exec(`DELETE FROM managed_torrents WHERE info_hash = ?`, infoHash)
+}
+
+func (e *Engine) restoreSpeedLimits() {
+	if e.db == nil {
+		return
+	}
+	var dlStr, ulStr string
+	row := e.db.QueryRow(`SELECT value FROM app_settings WHERE key = 'download_limit_kbps'`)
+	if err := row.Scan(&dlStr); err == nil {
+		if dl, convErr := strconv.Atoi(dlStr); convErr == nil && dl >= 0 {
+			e.SetDownloadLimit(dl)
+		}
+	}
+	row = e.db.QueryRow(`SELECT value FROM app_settings WHERE key = 'upload_limit_kbps'`)
+	if err := row.Scan(&ulStr); err == nil {
+		if ul, convErr := strconv.Atoi(ulStr); convErr == nil && ul >= 0 {
+			e.SetUploadLimit(ul)
+		}
+	}
+}
+
+// SetDownloadLimit configures the download speed limit in KB/s. 0 disables the limit.
+func (e *Engine) SetDownloadLimit(kbytesPerSec int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.downloadLimitKBps = kbytesPerSec
+	if kbytesPerSec <= 0 {
+		e.downloadLimiter.SetLimit(rate.Inf)
+	} else {
+		bytesPerSec := kbytesPerSec * 1024
+		burst := bytesPerSec / 2
+		if burst < 64*1024 {
+			burst = 64 * 1024
+		}
+		e.downloadLimiter.SetBurst(burst)
+		e.downloadLimiter.SetLimit(rate.Limit(bytesPerSec))
+	}
+	if e.db != nil {
+		_, _ = e.db.Exec(`INSERT INTO app_settings (key, value) VALUES ('download_limit_kbps', ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, strconv.Itoa(kbytesPerSec))
+	}
+}
+
+// SetUploadLimit configures the upload speed limit in KB/s. 0 disables the limit.
+func (e *Engine) SetUploadLimit(kbytesPerSec int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.uploadLimitKBps = kbytesPerSec
+	if kbytesPerSec <= 0 {
+		e.uploadLimiter.SetLimit(rate.Inf)
+	} else {
+		bytesPerSec := kbytesPerSec * 1024
+		burst := bytesPerSec / 2
+		if burst < 64*1024 {
+			burst = 64 * 1024
+		}
+		e.uploadLimiter.SetBurst(burst)
+		e.uploadLimiter.SetLimit(rate.Limit(bytesPerSec))
+	}
+	if e.db != nil {
+		_, _ = e.db.Exec(`INSERT INTO app_settings (key, value) VALUES ('upload_limit_kbps', ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, strconv.Itoa(kbytesPerSec))
+	}
+}
+
+// GetSpeedLimits returns the active download and upload limits in KB/s (0 = unlimited).
+func (e *Engine) GetSpeedLimits() (downloadKBps, uploadKBps int) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.downloadLimitKBps, e.uploadLimitKBps
 }
 
 // saveTorrentMetainfo caches the .torrent file in cacheDir so future launches load metadata instantly.
@@ -867,6 +957,112 @@ func (e *Engine) OpenFileReader(infoHash, fileName string) (io.ReadSeekCloser, e
 	return nil, fmt.Errorf("file %q not found in torrent %s", fileName, infoHash)
 }
 
+// ExportStreamedFile ensures that a specific file from a torrent is completely downloaded
+// and copied to the user's destination directory.
+func (e *Engine) ExportStreamedFile(infoHash, fileName, destDir string, timeout time.Duration) (string, error) {
+	if destDir == "" {
+		destDir = e.exportDir
+	}
+	if timeout <= 0 {
+		timeout = 60 * time.Second
+	}
+
+	infoHashLower := strings.ToLower(infoHash)
+	infoHashUpper := strings.ToUpper(infoHash)
+
+	e.mu.RLock()
+	var t *torrent.Torrent
+	if mt, ok := e.torrents[infoHashLower]; ok && mt.T != nil {
+		t = mt.T
+	} else if mt, ok := e.torrents[infoHashUpper]; ok && mt.T != nil {
+		t = mt.T
+	} else if mt, ok := e.torrents[infoHash]; ok && mt.T != nil {
+		t = mt.T
+	} else if pt, ok := e.pendingTorrents[infoHashLower]; ok && pt != nil {
+		t = pt
+	} else if pt, ok := e.pendingTorrents[infoHashUpper]; ok && pt != nil {
+		t = pt
+	} else if pt, ok := e.pendingTorrents[infoHash]; ok && pt != nil {
+		t = pt
+	}
+	e.mu.RUnlock()
+
+	if t == nil {
+		return "", fmt.Errorf("torrent %s not found", infoHash)
+	}
+
+	t.AllowDataDownload()
+	t.AllowDataUpload()
+	t.AddTrackers(defaultPublicTrackers)
+
+	normTarget := normalizeRelPath(fileName)
+	baseTarget := filepath.Base(normTarget)
+
+	var targetFile *torrent.File
+	for _, f := range t.Files() {
+		fNorm := normalizeRelPath(f.Path())
+		fBase := filepath.Base(fNorm)
+		if fNorm == normTarget || fBase == baseTarget || f.Path() == fileName || filepath.Base(f.Path()) == fileName {
+			targetFile = f
+			break
+		}
+	}
+
+	if targetFile == nil {
+		return "", fmt.Errorf("file %q not found in torrent %s", fileName, infoHash)
+	}
+
+	dst := filepath.Join(destDir, targetFile.Path())
+	if fi, err := os.Stat(dst); err == nil && fi.Size() >= targetFile.Length() && targetFile.Length() > 0 {
+		return dst, nil
+	}
+
+	// Prioritize all pieces of this file with highest urgency
+	targetFile.SetPriority(torrent.PiecePriorityNow)
+	targetFile.Download()
+
+	begin := targetFile.BeginPieceIndex()
+	end := targetFile.EndPieceIndex()
+	for i := begin; i < end; i++ {
+		t.Piece(i).SetPriority(torrent.PiecePriorityNow)
+	}
+
+	// Wait until file download completes or timeout expires
+	deadline := time.Now().Add(timeout)
+	for targetFile.BytesCompleted() < targetFile.Length() && targetFile.Length() > 0 {
+		if time.Now().After(deadline) {
+			return "", fmt.Errorf("timeout waiting for file download to complete (%d/%d bytes)", targetFile.BytesCompleted(), targetFile.Length())
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+
+	src := filepath.Join(e.cacheDir, targetFile.Path())
+	if fi, err := os.Stat(src); err != nil || (targetFile.Length() > 0 && fi.Size() < targetFile.Length()) {
+		return "", fmt.Errorf("cached file not ready on disk: %w", err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		return "", fmt.Errorf("failed to copy file to destination: %w", err)
+	}
+
+	// Also attempt to copy any completed album art in the torrent folder
+	targetDir := filepath.Dir(targetFile.Path())
+	for _, f := range t.Files() {
+		if f.Length() > 0 && f.BytesCompleted() == f.Length() {
+			fExt := strings.ToLower(filepath.Ext(f.Path()))
+			if fExt == ".jpg" || fExt == ".jpeg" || fExt == ".png" || fExt == ".webp" {
+				if filepath.Dir(f.Path()) == targetDir || targetDir == "." {
+					imgSrc := filepath.Join(e.cacheDir, f.Path())
+					imgDst := filepath.Join(destDir, f.Path())
+					_ = copyFile(imgSrc, imgDst)
+				}
+			}
+		}
+	}
+
+	return dst, nil
+}
+
 // GetProgress returns download/upload progress accurately calculated for selected files,
 // and automatically exports completed selected files to the user's Music/TorrentPlayer directory.
 func (e *Engine) GetProgress() []DownloadProgress {
@@ -1079,8 +1275,10 @@ func (e *Engine) GetProgress() []DownloadProgress {
 			Leechers:      leechers,
 			State:         state,
 			AddedAt:       addedAt,
-			SelectedCount: selectedCount,
-			SelectedTrack: selectedTrack,
+			SelectedCount:     selectedCount,
+			SelectedTrack:     selectedTrack,
+			DownloadLimitKBps: e.downloadLimitKBps,
+			UploadLimitKBps:   e.uploadLimitKBps,
 		})
 	}
 

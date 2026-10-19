@@ -1,13 +1,27 @@
 <script lang="ts" setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { usePlayerStore } from '../store/player'
+import { useDialogStore } from '../store/dialog'
 import { useI18n } from '../i18n'
 import { GetLyrics } from '../../wailsjs/go/main/App'
 import { parseLRC, type LyricLine } from '../utils/lrc'
 
 const player = usePlayerStore()
+const dialog = useDialogStore()
 const { t } = useI18n()
 const s = computed(() => player.status)
+
+async function handleSaveTrack() {
+  if (player.isCurrentSaved || player.isSavingTrack) return
+  try {
+    const ok = await player.saveCurrentTrack()
+    if (ok) {
+      dialog.toast(t('player.toastTrackSaved'), 'success')
+    }
+  } catch (err: any) {
+    dialog.toast(err?.message || String(err), 'error')
+  }
+}
 
 const showLyrics = ref<boolean>(true)
 
@@ -180,6 +194,10 @@ async function fetchLyrics(force: boolean = false) {
   if (!force && key === lastLoadedKey.value && lyricsData.value) {
     return
   }
+  // On force-retry also clear the key so state is fully reset
+  if (force) {
+    lastLoadedKey.value = ''
+  }
   lastLoadedKey.value = key
 
   // Reset scroll and manual state on new track
@@ -197,7 +215,8 @@ async function fetchLyrics(force: boolean = false) {
       title,
       album,
       s.value.durationSec || 0,
-      tr.filePath || ''
+      tr.filePath || '',
+      force        // bypass backend cache when user clicked "Retry"
     )
     lyricsData.value = res as any
     nextTick(() => {
@@ -237,7 +256,7 @@ const progress = computed(() => {
 })
 
 function onSeekClick(e: MouseEvent) {
-  if (s.value.state === 'stopped' || !s.value.durationSec) return
+  if (!s.value.durationSec) return
   const container = e.currentTarget as HTMLElement
   const bar = container.querySelector('.fs-progress-bar') as HTMLElement
   if (!bar) return
@@ -374,6 +393,24 @@ onUnmounted(() => {
             <h1 class="fs-title" :title="displayTitle">{{ displayTitle }}</h1>
             <div class="fs-artist" :title="displayArtist">{{ displayArtist }}</div>
             <div class="fs-album" v-if="displayAlbum" :title="displayAlbum">{{ displayAlbum }}</div>
+
+            <!-- Save Streamed Track Button -->
+            <button
+              v-if="s.track && s.state !== 'stopped'"
+              class="fs-save-stream-btn"
+              :class="{
+                'is-saved': player.isCurrentSaved,
+                'is-saving': player.isSavingTrack,
+                'can-save': !player.isCurrentSaved
+              }"
+              :disabled="player.isCurrentSaved || player.isSavingTrack"
+              @click="handleSaveTrack"
+              :title="player.isCurrentSaved ? t('player.savedInLibrary') : (player.isSavingTrack ? t('player.savingTrack') : t('player.saveTrackBtn'))"
+            >
+              <span v-if="player.isSavingTrack" class="btn-spinner">⏳ {{ t('player.savingTrack') }}</span>
+              <span v-else-if="player.isCurrentSaved" class="btn-check">✓ {{ t('player.savedInLibrary') }}</span>
+              <span v-else class="btn-save-content">💾 {{ t('player.saveTrackBtn') }}</span>
+            </button>
           </div>
         </div>
 
@@ -492,14 +529,16 @@ onUnmounted(() => {
               :disabled="player.playlist.length === 0"
               :title="t('player.prevTrack')"
             >
-              ⏮
+              <svg viewBox="0 0 24 24" class="fs-nav-svg">
+                <path fill="currentColor" d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
+              </svg>
             </button>
 
             <!-- Play / Pause -->
             <button
               class="fs-play-btn"
               @click="player.togglePause"
-              :disabled="s.state === 'stopped' && !player.currentQueueTrack"
+              :disabled="player.playlist.length === 0 && !s.track"
               :title="s.state === 'playing' ? t('common.pause') : t('common.play')"
             >
               <svg v-if="s.state === 'playing'" viewBox="0 0 24 24" class="fs-play-svg">
@@ -517,7 +556,9 @@ onUnmounted(() => {
               :disabled="player.playlist.length === 0"
               :title="t('player.nextTrack')"
             >
-              ⏭
+              <svg viewBox="0 0 24 24" class="fs-nav-svg">
+                <path fill="currentColor" d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+              </svg>
             </button>
 
             <!-- Repeat -->
@@ -1174,16 +1215,23 @@ onUnmounted(() => {
 }
 
 .fs-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  aspect-ratio: 1 / 1;
   background: transparent;
   border: none;
   color: var(--text);
-  font-size: 22px;
+  font-size: 20px;
   cursor: pointer;
-  padding: 8px;
+  padding: 0;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  box-sizing: border-box;
+  flex-shrink: 0;
   opacity: 0.75;
   transition: all 0.15s ease;
 }
@@ -1197,6 +1245,12 @@ onUnmounted(() => {
 .fs-btn:disabled {
   opacity: 0.25;
   cursor: not-allowed;
+}
+
+.fs-nav-svg {
+  width: 24px;
+  height: 24px;
+  display: block;
 }
 
 .fs-shuffle-btn.active,
@@ -1289,5 +1343,48 @@ onUnmounted(() => {
   .fs-volume-wrap {
     display: none;
   }
+}
+
+/* Save Streamed Track Button in Fullscreen */
+.fs-save-stream-btn {
+  margin-top: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  border-radius: 20px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(10px);
+}
+
+.fs-save-stream-btn.can-save:hover {
+  background: rgba(29, 185, 84, 0.22);
+  border-color: var(--accent);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(29, 185, 84, 0.25);
+}
+
+.fs-save-stream-btn.is-saved {
+  background: rgba(29, 185, 84, 0.15);
+  border-color: rgba(29, 185, 84, 0.4);
+  color: var(--accent);
+  cursor: default;
+}
+
+.fs-save-stream-btn.is-saving {
+  cursor: wait;
+}
+
+.btn-save-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 </style>

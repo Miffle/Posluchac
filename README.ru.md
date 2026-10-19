@@ -11,11 +11,12 @@
 
 <p align="center">
   <a href="https://github.com/Miffle/Posluchac/releases/latest"><img src="https://img.shields.io/github/v/release/Miffle/Posluchac?color=1db954&style=flat-square" alt="Последний релиз"></a>
+  <a href="https://discord.gg/rQ9vADRJvQ"><img src="https://img.shields.io/badge/Discord-Присоединиться-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
   <img src="https://img.shields.io/badge/платформа-Windows%2010%20%7C%2011-0078D6?style=flat-square&logo=windows" alt="Платформа: Windows">
   <img src="https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Wails-v2-DF1A29?style=flat-square" alt="Wails">
   <img src="https://img.shields.io/badge/Vue-3%20%2B%20TypeScript-42b883?style=flat-square&logo=vue.js" alt="Vue 3">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/лицензия-MIT-blue?style=flat-square" alt="Лицензия: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/лицензия-GPLv3-blue?style=flat-square" alt="Лицензия: GPLv3"></a>
 </p>
 
 ---
@@ -48,14 +49,20 @@
 * **Избранное и плейлисты**: добавление треков в любимые (❤️), создание собственных плейлистов и управление ими.
 
 ### 🎛️ Плеер и интеграция с Windows
-* **Режимы воспроизведения**: повтор одного трека, повтор плейлиста, случайный порядок (перемешивание по алгоритму Fisher-Yates).
+* **Режимы воспроизведения**: повтор одного трека, повтор плейлиста, интеллектуальный цикл перемешивания без повторов (draw without replacement) с пошаговой историей возврата назад.
+* **Синхронизированные тексты песен (LRC)**: отображение бегущей строки в стиле караоке из открытой базы LRCLIB или локальных `.lrc` файлов с центрированием и перемоткой по клику.
 * **MediaSession API**: управление с мультимедийных клавиш клавиатуры (Play/Pause, Next, Prev) и системный оверлей Windows.
-* **Полноэкранный режим обложки**: стильный режим отображения виниловой пластинки на весь экран с элементами управления (`Esc` для выхода).
+* **Полноэкранный режим обложки**: иммерсивный полноэкранный режим с оригинальной обложкой альбома, бегущими текстами, регулятором громкости и элементами управления (`Esc` для выхода).
 
 ### 🔕 Системный трей Windows
 * **Сворачивание / закрытие в трей**: приложение продолжает играть в фоне при закрытии окна.
 * **Восстановление по клику**: разворачивание окна по клику левой кнопкой мыши на иконку в области уведомлений.
 * **Нативное контекстное меню**: меню правой кнопки мыши («Открыть Послушак» и «Выйти») для полного и чистого завершения процесса без зависания в диспетчере задач.
+
+### 🎮 Discord Rich Presence (RPC)
+* **Трансляция трека в профиль**: отображение названия песни, исполнителя, альбома и живого таймлайна («Слушает Posluchac») в реальном времени.
+* **Интерактивные кнопки**: быстрый переход к скачиванию плеера и открытию GitHub-репозитория прямо из вашего Discord-статуса.
+* **Работа «из коробки»**: официальный Client ID уже встроен в плеер — не требует создания ботов или настройки Developer Portal. Включается и выключается одним тумблером в Настройках.
 
 ### 🌐 Локализация и обновления
 * **Двуязычный интерфейс (RU / EN)**: полноценный перевод всех экранов, модальных окон и подсказок с переключением на лету в Настройках.
@@ -172,15 +179,23 @@ build/bin/Posluchac.exe
 5. Создайте Pull Request
 
 ---
-## Discord
-Обязательно заходи в дискорд, там появляются уведомления о новых релизах 
 
-**[Сслыка на дискорд](https://discord.gg/rQ9vADRJvQ)**
+## 💬 Сообщество и Discord
+
+Присоединяйтесь к нашему Discord-серверу, чтобы первыми узнавать о свежих релизах, делиться идеями и впечатлениями, сообщать об ошибках и общаться с сообществом:
+
+<p align="center">
+  <a href="https://discord.gg/rQ9vADRJvQ">
+    <img src="https://img.shields.io/badge/Discord-Присоединиться-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord Posluchac">
+  </a>
+</p>
+
+👉 **[Перейти в Discord-сервер Posluchac](https://discord.gg/rQ9vADRJvQ)**
 
 ---
 
 ## 📄 Лицензия
 
-Проект распространяется под свободной лицензией [MIT](LICENSE).
+Проект распространяется под свободной лицензией с открытым исходным кодом [GNU General Public License v3.0 (GPLv3)](LICENSE).
 
 <p align="center">Сделано с ❤️ для ценителей музыки.</p>

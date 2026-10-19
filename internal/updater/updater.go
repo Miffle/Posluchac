@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	CurrentVersion = "1.3.0"
+	CurrentVersion = "1.4.0"
 	RepoOwner      = "Miffle"
 	RepoName       = "Posluchac"
 )

@@ -10,6 +10,8 @@ require (
 	github.com/mewkiz/flac v1.0.8
 	github.com/wailsapp/wails/v2 v2.16.0
 	golang.org/x/sys v0.46.0
+	golang.org/x/time v0.8.0
+	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	modernc.org/sqlite v1.33.1
 )
 
@@ -116,7 +118,6 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
-	golang.org/x/time v0.8.0 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.55.3 // indirect

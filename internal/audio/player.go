@@ -58,14 +58,15 @@ type Status struct {
 
 // Player manages audio playback.
 type Player struct {
-	mu       sync.Mutex
-	state    PlayerState
-	ctrl     *beep.Ctrl
-	vol      *effects.Volume
-	streamer beep.StreamSeekCloser
-	format   beep.Format
-	track    *TrackInfo
-	volume   float64 // 0.0 – 1.0, mapped to beep volume
+	mu           sync.Mutex
+	state        PlayerState
+	ctrl         *beep.Ctrl
+	vol          *effects.Volume
+	streamer     beep.StreamSeekCloser
+	format       beep.Format
+	track        *TrackInfo
+	volume       float64 // 0.0 – 1.0, mapped to beep volume
+	onTrackEnded func()
 }
 
 // NewPlayer initialises the speaker and returns a Player.
@@ -77,6 +78,39 @@ func NewPlayer() (*Player, error) {
 		state:  StateStopped,
 		volume: 0.8,
 	}, nil
+}
+
+// SetOnTrackEnded sets a callback invoked when a track finishes playback.
+func (p *Player) SetOnTrackEnded(cb func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onTrackEnded = cb
+}
+
+func (p *Player) playStreamerLocked() {
+	var resampled beep.Streamer = p.streamer
+	if p.format.SampleRate != sampleRate {
+		resampled = beep.Resample(4, p.format.SampleRate, sampleRate, p.streamer)
+	}
+
+	p.ctrl = &beep.Ctrl{Streamer: resampled, Paused: false}
+	p.vol = &effects.Volume{
+		Streamer: p.ctrl,
+		Base:     2,
+		Volume:   p.dbVolume(),
+		Silent:   p.volume <= 0.001,
+	}
+
+	speaker.Clear()
+	speaker.Play(beep.Seq(p.vol, beep.Callback(func() {
+		p.mu.Lock()
+		p.state = StateStopped
+		cb := p.onTrackEnded
+		p.mu.Unlock()
+		if cb != nil {
+			go cb()
+		}
+	})))
 }
 
 // Play opens an audio stream from r and starts playback.
@@ -93,29 +127,12 @@ func (p *Player) Play(r io.ReadSeekCloser, ext string, track TrackInfo) error {
 		return fmt.Errorf("decode audio: %w", err)
 	}
 
-	// Resample if the track's sample rate differs from the speaker's
-	resampled := beep.Resample(4, format.SampleRate, sampleRate, streamer)
-
-	ctrl := &beep.Ctrl{Streamer: resampled, Paused: false}
-	vol := &effects.Volume{
-		Streamer: ctrl,
-		Base:     2,
-		Volume:   p.dbVolume(),
-		Silent:   p.volume <= 0.001,
-	}
-
 	p.streamer = streamer
 	p.format = format
-	p.ctrl = ctrl
-	p.vol = vol
 	p.track = &track
 	p.state = StatePlaying
 
-	speaker.Play(beep.Seq(vol, beep.Callback(func() {
-		p.mu.Lock()
-		p.state = StateStopped
-		p.mu.Unlock()
-	})))
+	p.playStreamerLocked()
 
 	return nil
 }
@@ -124,6 +141,19 @@ func (p *Player) Play(r io.ReadSeekCloser, ext string, track TrackInfo) error {
 func (p *Player) Pause() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	if p.streamer == nil {
+		return
+	}
+
+	if p.state == StateStopped {
+		if p.streamer.Len() > 0 && p.streamer.Position() >= p.streamer.Len() {
+			_ = p.streamer.Seek(0)
+		}
+		p.playStreamerLocked()
+		p.state = StatePlaying
+		return
+	}
 
 	if p.ctrl == nil {
 		return
@@ -155,6 +185,16 @@ func (p *Player) SeekTo(seconds float64) error {
 	}
 	if maxLen := p.streamer.Len(); maxLen > 0 && samplePos > maxLen {
 		samplePos = maxLen
+	}
+
+	if p.state == StateStopped {
+		err := p.streamer.Seek(samplePos)
+		if err != nil {
+			return err
+		}
+		p.playStreamerLocked()
+		p.state = StatePlaying
+		return nil
 	}
 
 	wasPaused := p.state == StatePaused
@@ -236,6 +276,16 @@ func (p *Player) Status() Status {
 
 		s.PositionSec = p.format.SampleRate.D(pos).Seconds()
 		s.DurationSec = p.format.SampleRate.D(length).Seconds()
+
+		// If position reached or passed the end while state was playing, mark stopped
+		if p.state == StatePlaying && length > 0 && pos >= length {
+			p.state = StateStopped
+			s.State = StateStopped
+			cb := p.onTrackEnded
+			if cb != nil {
+				go cb()
+			}
+		}
 	}
 
 	return s

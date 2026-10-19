@@ -426,5 +426,18 @@ func TestManagerSearchFTS(t *testing.T) {
 	if !ok || corrected != "linkin park" {
 		t.Fatalf("expected CorrectQuery('linken park') to return ('linkin park', true), got (%s, %v)", corrected, ok)
 	}
+
+	// 11. Test that non-existent multi-word queries do not return random releases matching only 1 word
+	resNotFound := mgr.Search(ctx, "Baby Cute", "", 10)
+	if len(resNotFound) != 0 {
+		t.Fatalf("expected 0 results for 'Baby Cute' not in DB, got %d results: %v", len(resNotFound), resNotFound)
+	}
+
+	// 12. Test that format stopwords (like cue) are never returned as fuzzy replacements
+	vocab := mgr.getVocab(ctx)
+	cand, found := FindFuzzyCandidate("cute", vocab)
+	if found && cand == "cue" {
+		t.Fatalf("FindFuzzyCandidate('cute') must not return format stopword 'cue'")
+	}
 }
 

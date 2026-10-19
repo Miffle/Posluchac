@@ -13,6 +13,7 @@ import { usePlaylistsStore } from '../store/playlists'
 import { useDialogStore } from '../store/dialog'
 import { useI18n } from '../i18n'
 import AddToPlaylistModal from './AddToPlaylistModal.vue'
+import EditMetadataModal from './EditMetadataModal.vue'
 
 const { t, locale } = useI18n()
 
@@ -63,6 +64,20 @@ const trackForPlaylist = ref<Track | null>(null)
 function openAddToPlaylist(track: Track) {
   playlistsStore.loadPlaylists()
   trackForPlaylist.value = track
+}
+
+const editingTrack = ref<Track | null>(null)
+
+function openEditMetadata(track: Track) {
+  editingTrack.value = track
+}
+
+function onMetadataSaved(updated: any) {
+  if (!updated) return
+  const idx = tracks.value.findIndex(t => t.id === updated.id)
+  if (idx !== -1) {
+    tracks.value[idx] = { ...tracks.value[idx], ...updated }
+  }
 }
 
 function isTrackActive(track: Track): boolean {
@@ -487,6 +502,7 @@ watch(filteredArtists, (newArtists) => {
                   >
                     {{ track.favourite ? '❤️' : '🤍' }}
                   </button>
+                  <button class="action-btn edit-btn" @click.stop="openEditMetadata(track)" :title="t('library.editMetadata')">🏷️</button>
                   <button class="action-btn playlist-btn" @click.stop="openAddToPlaylist(track)" :title="t('library.addToPlaylist')">📋+</button>
                   <button class="del-btn" @click.stop="deleteTrack(track)" :title="t('library.deleteTrack')">🗑</button>
                 </div>
@@ -557,6 +573,7 @@ watch(filteredArtists, (newArtists) => {
             >
               {{ track.favourite ? '❤️' : '🤍' }}
             </button>
+            <button class="action-btn edit-btn" @click.stop="openEditMetadata(track)" :title="t('library.editMetadata')">🏷️</button>
             <button class="action-btn playlist-btn" @click.stop="openAddToPlaylist(track)" :title="t('library.addToPlaylist')">📋+</button>
             <button class="del-btn" @click.stop="deleteTrack(track)" :title="t('library.deleteTrack')">🗑</button>
           </div>
@@ -568,6 +585,13 @@ watch(filteredArtists, (newArtists) => {
     <AddToPlaylistModal
       :track="trackForPlaylist"
       @close="trackForPlaylist = null"
+    />
+
+    <!-- Modal for editing track metadata -->
+    <EditMetadataModal
+      :track="editingTrack"
+      @close="editingTrack = null"
+      @saved="onMetadataSaved"
     />
   </div>
 </template>
@@ -752,17 +776,19 @@ watch(filteredArtists, (newArtists) => {
 .fav-btn:hover { opacity: 1 !important; transform: scale(1.15); }
 .fav-btn.active { opacity: 1 !important; }
 
-.playlist-btn {
+.action-btn {
   font-size: 13px;
   opacity: 0;
   padding: 4px 6px;
   border-radius: 6px;
   transition: opacity 0.1s, background 0.1s;
   background: transparent;
+  border: none;
+  cursor: pointer;
   color: var(--text2);
 }
-.track-row:hover .playlist-btn { opacity: 0.8; }
-.playlist-btn:hover { opacity: 1 !important; color: var(--accent); background: var(--bg3); }
+.track-row:hover .action-btn { opacity: 0.8; }
+.action-btn:hover { opacity: 1 !important; color: var(--accent); background: var(--bg3); }
 
 .del-btn {
   font-size: 14px; opacity: 0; padding: 4px; border-radius: 6px;

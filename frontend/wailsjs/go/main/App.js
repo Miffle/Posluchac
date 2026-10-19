@@ -10,6 +10,10 @@ export function AddFromResultPending(arg1) {
   return window['go']['main']['App']['AddFromResultPending'](arg1);
 }
 
+export function AddLibraryFolder(arg1) {
+  return window['go']['main']['App']['AddLibraryFolder'](arg1);
+}
+
 export function AddMagnet(arg1) {
   return window['go']['main']['App']['AddMagnet'](arg1);
 }
@@ -42,6 +46,10 @@ export function CheckForUpdates() {
   return window['go']['main']['App']['CheckForUpdates']();
 }
 
+export function ChooseLibraryFolderDialog() {
+  return window['go']['main']['App']['ChooseLibraryFolderDialog']();
+}
+
 export function CreatePlaylist(arg1) {
   return window['go']['main']['App']['CreatePlaylist'](arg1);
 }
@@ -62,12 +70,20 @@ export function DownloadSelectedFiles(arg1, arg2) {
   return window['go']['main']['App']['DownloadSelectedFiles'](arg1, arg2);
 }
 
+export function ExportPlaylist(arg1) {
+  return window['go']['main']['App']['ExportPlaylist'](arg1);
+}
+
 export function GetAppVersion() {
   return window['go']['main']['App']['GetAppVersion']();
 }
 
 export function GetCover(arg1) {
   return window['go']['main']['App']['GetCover'](arg1);
+}
+
+export function GetDiscordRPCEnabled() {
+  return window['go']['main']['App']['GetDiscordRPCEnabled']();
 }
 
 export function GetDownloadDir() {
@@ -82,8 +98,12 @@ export function GetLibrary() {
   return window['go']['main']['App']['GetLibrary']();
 }
 
-export function GetLyrics(arg1, arg2, arg3, arg4, arg5) {
-  return window['go']['main']['App']['GetLyrics'](arg1, arg2, arg3, arg4, arg5);
+export function GetLibraryFolders() {
+  return window['go']['main']['App']['GetLibraryFolders']();
+}
+
+export function GetLyrics(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['main']['App']['GetLyrics'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
 
 export function GetPlaylistTracks(arg1) {
@@ -102,8 +122,20 @@ export function GetStatus() {
   return window['go']['main']['App']['GetStatus']();
 }
 
+export function GetTorrentSpeedLimits() {
+  return window['go']['main']['App']['GetTorrentSpeedLimits']();
+}
+
+export function ImportPlaylist() {
+  return window['go']['main']['App']['ImportPlaylist']();
+}
+
 export function ImportTrackToLibrary(arg1, arg2) {
   return window['go']['main']['App']['ImportTrackToLibrary'](arg1, arg2);
+}
+
+export function IsCurrentTrackSaved() {
+  return window['go']['main']['App']['IsCurrentTrackSaved']();
 }
 
 export function ListPlaylists() {
@@ -150,6 +182,10 @@ export function RemoveFromPlaylist(arg1, arg2) {
   return window['go']['main']['App']['RemoveFromPlaylist'](arg1, arg2);
 }
 
+export function RemoveLibraryFolder(arg1, arg2) {
+  return window['go']['main']['App']['RemoveLibraryFolder'](arg1, arg2);
+}
+
 export function RemoveTorrent(arg1, arg2) {
   return window['go']['main']['App']['RemoveTorrent'](arg1, arg2);
 }
@@ -164,6 +200,10 @@ export function ResumeTorrent(arg1) {
 
 export function RutrackerStatus() {
   return window['go']['main']['App']['RutrackerStatus']();
+}
+
+export function SaveCurrentStreamedTrack() {
+  return window['go']['main']['App']['SaveCurrentStreamedTrack']();
 }
 
 export function ScanLibrary() {
@@ -186,12 +226,20 @@ export function SeekTo(arg1) {
   return window['go']['main']['App']['SeekTo'](arg1);
 }
 
+export function SetDiscordRPCEnabled(arg1) {
+  return window['go']['main']['App']['SetDiscordRPCEnabled'](arg1);
+}
+
 export function SetRutrackerCookie(arg1) {
   return window['go']['main']['App']['SetRutrackerCookie'](arg1);
 }
 
 export function SetRutrackerMirror(arg1) {
   return window['go']['main']['App']['SetRutrackerMirror'](arg1);
+}
+
+export function SetTorrentSpeedLimits(arg1, arg2) {
+  return window['go']['main']['App']['SetTorrentSpeedLimits'](arg1, arg2);
 }
 
 export function SetVolume(arg1) {
@@ -208,4 +256,8 @@ export function SyncSources() {
 
 export function ToggleFavourite(arg1) {
   return window['go']['main']['App']['ToggleFavourite'](arg1);
+}
+
+export function UpdateTrackMetadata(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['UpdateTrackMetadata'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }

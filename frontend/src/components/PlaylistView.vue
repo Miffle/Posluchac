@@ -5,6 +5,7 @@ import { usePlayerStore } from '../store/player'
 import { useDialogStore } from '../store/dialog'
 import { useI18n } from '../i18n'
 import PlaylistAddTracksModal from './PlaylistAddTracksModal.vue'
+import EditMetadataModal from './EditMetadataModal.vue'
 
 const playlistsStore = usePlaylistsStore()
 const player = usePlayerStore()
@@ -12,6 +13,22 @@ const dialog = useDialogStore()
 const { t } = useI18n()
 const newName = ref('')
 const showAddModal = ref(false)
+const editingTrack = ref<any | null>(null)
+
+function openEditMetadata(track: any) {
+  editingTrack.value = track
+}
+
+function onMetadataSaved(updated: any) {
+  if (!updated) return
+  const found = playlistsStore.tracks.find(t => t.id === updated.id)
+  if (found) {
+    found.title = updated.title
+    found.artist = updated.artist
+    found.album = updated.album
+    found.genre = updated.genre
+  }
+}
 
 async function createPlaylist() {
   if (!newName.value.trim()) return
@@ -89,6 +106,9 @@ onMounted(() => {
           />
           <button class="btn btn-accent" @click="createPlaylist" :title="t('playlists.createBtn')">+</button>
         </div>
+        <button class="btn btn-import-m3u" @click="playlistsStore.importM3U" :title="t('playlists.importBtn')">
+          📥 {{ t('playlists.importBtn') }}
+        </button>
 
         <div class="playlist-items">
           <div
@@ -119,9 +139,19 @@ onMounted(() => {
               <h2>{{ playlistsStore.selected.name }}</h2>
               <span class="track-count">{{ playlistsStore.tracks.length }} {{ t('playlists.trackCount') }}</span>
             </div>
-            <button class="btn btn-accent btn-sm" @click="showAddModal = true">
-              ➕ {{ t('playlists.addTracksBtn') }}
-            </button>
+            <div class="header-actions">
+              <button
+                class="btn btn-secondary btn-sm"
+                @click="playlistsStore.exportM3U(playlistsStore.selected.id)"
+                :title="t('playlists.exportBtn')"
+                v-if="playlistsStore.tracks.length"
+              >
+                💾 {{ t('playlists.exportBtn') }}
+              </button>
+              <button class="btn btn-accent btn-sm" @click="showAddModal = true">
+                ➕ {{ t('playlists.addTracksBtn') }}
+              </button>
+            </div>
           </div>
 
           <div v-if="!playlistsStore.tracks.length" class="empty-state">
@@ -146,6 +176,13 @@ onMounted(() => {
               </div>
               <div class="track-duration">{{ formatDuration(track.durationSec) }}</div>
               <div class="track-actions">
+                <button
+                  class="edit-btn"
+                  @click.stop="openEditMetadata(track)"
+                  :title="t('library.editMetadata')"
+                >
+                  🏷️
+                </button>
                 <button
                   class="play-btn"
                   :class="{ 'is-playing': isTrackPlaying(track) }"
@@ -172,6 +209,13 @@ onMounted(() => {
     <PlaylistAddTracksModal
       :playlist="showAddModal ? playlistsStore.selected : null"
       @close="showAddModal = false"
+    />
+
+    <!-- Modal to edit track metadata -->
+    <EditMetadataModal
+      :track="editingTrack"
+      @close="editingTrack = null"
+      @saved="onMetadataSaved"
     />
   </div>
 </template>
@@ -211,6 +255,27 @@ h1 { font-size: 24px; font-weight: 700; }
 .new-playlist input:focus { border-color: var(--accent); outline: none; }
 .new-playlist .btn { padding: 8px 14px; font-size: 18px; line-height: 1; }
 
+.btn-import-m3u {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  transition: all 0.15s ease;
+}
+.btn-import-m3u:hover {
+  background: var(--surface2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .playlist-items { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; }
 .playlist-item {
   display: flex; align-items: center; gap: 10px;
@@ -232,6 +297,7 @@ h1 { font-size: 24px; font-weight: 700; }
 .track-panel { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .track-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .header-titles { display: flex; align-items: baseline; gap: 12px; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
 .track-panel-header h2 { font-size: 20px; font-weight: 700; }
 .track-count { font-size: 13px; color: var(--text2); }
 
@@ -270,6 +336,20 @@ h1 { font-size: 24px; font-weight: 700; }
 .track-row:hover .play-btn { opacity: 1; }
 .track-row.playing .play-btn { opacity: 1; }
 .play-btn:hover { transform: scale(1.05); }
+
+.edit-btn {
+  opacity: 0;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text2);
+  transition: all 0.1s;
+}
+.track-row:hover .edit-btn { opacity: 0.8; }
+.edit-btn:hover { opacity: 1 !important; color: var(--accent); background: var(--surface2); }
 
 .del-btn {
   opacity: 0; font-size: 13px; padding: 2px 6px; border-radius: 4px;

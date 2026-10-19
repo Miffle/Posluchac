@@ -523,11 +523,62 @@ func DamerauLevenshtein(a, b []rune) int {
 	return d[la][lb]
 }
 
+var formatStopwords = map[string]bool{
+	"cue":        true,
+	"cues":       true,
+	"flac":       true,
+	"mp3":        true,
+	"lossless":   true,
+	"tracks":     true,
+	"track":      true,
+	"image":      true,
+	"album":      true,
+	"albums":     true,
+	"single":     true,
+	"singles":    true,
+	"soundtrack": true,
+	"ost":        true,
+	"web":        true,
+	"rip":        true,
+	"cd":         true,
+	"cds":        true,
+	"dvd":        true,
+	"vinyl":      true,
+	"remaster":   true,
+	"remastered": true,
+	"deluxe":     true,
+	"edition":    true,
+	"bonus":      true,
+	"disc":       true,
+	"discs":      true,
+	"disk":       true,
+	"disks":      true,
+	"kbps":       true,
+	"audio":      true,
+	"music":      true,
+	"genre":      true,
+	"year":       true,
+	"aac":        true,
+	"ogg":        true,
+	"wav":        true,
+	"alac":       true,
+	"ape":        true,
+	"m4a":        true,
+	"hires":      true,
+}
+
+// IsFormatStopword returns true if the word is an audio format or metadata descriptor.
+func IsFormatStopword(term string) bool {
+	return formatStopwords[strings.ToLower(strings.TrimSpace(term))]
+}
+
 // FindFuzzyCandidate finds the best matching term in vocab within edit distance 1 (or 2 for long words).
+// Words with length < 4 are never fuzzy-matched. Technical and format keywords are blacklisted from
+// being returned as typo candidates to prevent terms like "cute" matching "cue" or "rap" matching "rip".
 func FindFuzzyCandidate(token string, vocab map[string]int) (string, bool) {
 	rToken := []rune(strings.ToLower(token))
 	lenToken := len(rToken)
-	if lenToken < 3 {
+	if lenToken < 4 {
 		return "", false
 	}
 
@@ -541,13 +592,28 @@ func FindFuzzyCandidate(token string, vocab map[string]int) (string, bool) {
 		maxDist = 2
 	}
 
+	// For 4-letter words, only allow candidates of at least length 4 (do not reduce to 3-letter terms)
+	minLen := 4
+	if lenToken >= 5 {
+		minLen = lenToken - 1
+	}
+
 	bestMatch := ""
 	bestDist := maxDist + 1
 	bestCount := -1
 
 	for term, cnt := range vocab {
+		tLower := strings.ToLower(term)
+		// Blacklist format stopwords from candidate replacements
+		if formatStopwords[tLower] {
+			continue
+		}
+
 		rTerm := []rune(term)
 		lenTerm := len(rTerm)
+		if lenTerm < minLen {
+			continue
+		}
 
 		diff := lenToken - lenTerm
 		if diff < 0 {
@@ -622,19 +688,26 @@ func BuildFuzzyFTS5Query(tokens []string, vocab map[string]int, formatFilter str
 	return finalFts, strings.Join(correctedWords, " "), true
 }
 
-// BuildRelaxedFTS5Query builds a relaxed OR query across terms, useful when multi-word queries
-// contain minor differences or typos, ranked by bm25.
+// BuildRelaxedFTS5Query builds a relaxed OR query across terms, useful when multi-word queries (3+ words)
+// contain minor differences, ranked by bm25. It ignores format stopwords to prevent broad false-positives.
 func BuildRelaxedFTS5Query(tokens []string, vocab map[string]int, formatFilter string) string {
+	if len(tokens) < 3 {
+		return ""
+	}
+
 	var orClauses []string
 	for _, t := range tokens {
 		tLower := strings.ToLower(t)
+		if formatStopwords[tLower] {
+			continue
+		}
 		cand, found := FindFuzzyCandidate(tLower, vocab)
-		if found && cand != tLower {
+		if found && cand != tLower && !formatStopwords[strings.ToLower(cand)] {
 			orClauses = append(orClauses, fmt.Sprintf(`"%s"*`, cand))
 		}
 		orClauses = append(orClauses, fmt.Sprintf(`"%s"*`, tLower))
 	}
-	if len(orClauses) == 0 {
+	if len(orClauses) < 2 {
 		return ""
 	}
 	baseExpr := fmt.Sprintf("(%s)", strings.Join(orClauses, " OR "))
@@ -773,8 +846,8 @@ func (m *Manager) Search(ctx context.Context, query string, formatFilter string,
 				}
 			}
 
-			// 2b. If strict AND produced 0, try relaxed OR ranking across candidates
-			if len(tokens) > 1 {
+			// 2b. If strict AND produced 0, try relaxed OR ranking only for queries with >= 3 words
+			if len(tokens) >= 3 {
 				relaxedExpr := BuildRelaxedFTS5Query(tokens, vocab, formatFilter)
 				if relaxedExpr != "" {
 					results := m.queryFTS5(ctx, relaxedExpr, formatFilter, limit)

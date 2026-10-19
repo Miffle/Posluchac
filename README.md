@@ -11,11 +11,12 @@
 
 <p align="center">
   <a href="https://github.com/Miffle/Posluchac/releases/latest"><img src="https://img.shields.io/github/v/release/Miffle/Posluchac?color=1db954&style=flat-square" alt="Latest Release"></a>
+  <a href="https://discord.gg/rQ9vADRJvQ"><img src="https://img.shields.io/badge/Discord-Join%20Chat-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord"></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-0078D6?style=flat-square&logo=windows" alt="Platform: Windows">
   <img src="https://img.shields.io/badge/Go-1.23+-00ADD8?style=flat-square&logo=go" alt="Go">
   <img src="https://img.shields.io/badge/Wails-v2-DF1A29?style=flat-square" alt="Wails">
   <img src="https://img.shields.io/badge/Vue-3%20%2B%20TypeScript-42b883?style=flat-square&logo=vue.js" alt="Vue 3">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License: MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue?style=flat-square" alt="License: GPLv3"></a>
 </p>
 
 ---
@@ -48,14 +49,20 @@
 * **Favorites & Playlists**: Mark favorite songs (❤️) and organize your collection into custom playlists.
 
 ### 🎛️ Audio Playback & Media Integration
-* **Queue & Playback Modes**: Loop track, repeat playlist, or shuffle queue using Fisher-Yates randomization.
+* **Queue & Playback Modes**: Loop track, repeat playlist, or smart non-repeating shuffle cycle (draw without replacement) with backward history navigation.
+* **Synchronized Lyrics (LRC)**: Real-time karaoke-style running lyrics fetched from LRCLIB or local `.lrc` files with auto-centering and interactive seek.
 * **MediaSession API**: Hardware media keys support (Play, Pause, Next, Prev) and native Windows media overlay.
-* **Fullscreen Cover Mode**: Immersive vinyl-style cover presentation with player controls (`Esc` to exit).
+* **Fullscreen Cover Mode**: Immersive full-screen album art presentation with running lyrics, volume slider, and playback controls (`Esc` to exit).
 
 ### 🔕 Native Windows System Tray
 * **Minimize / Close to Tray**: Closes directly to the Windows notification area to keep music playing in the background.
 * **Single / Double Click Restore**: Instant window restore and focus on left click.
 * **Native Win32 Context Menu**: Right-click menu with **Open Posluchac** and **Exit** for a clean process shutdown without orphaned background tasks.
+
+### 🎮 Discord Rich Presence (RPC)
+* **Live Listening Activity**: Broadcasts currently playing track, artist, album, and real-time playback timeline ("Listening to Posluchac") to your Discord profile.
+* **Interactive Profile Buttons**: Direct buttons for friends to download Posluchac or open the GitHub repository right from your status card.
+* **Zero Configuration**: Official client ID built-in — works automatically via local IPC socket without tokens or Discord Developer Portal setup. Can be toggled in Settings.
 
 ### 🌐 Internationalization & Updates
 * **Multilingual UI**: Fully localized in English and Russian, switchable in Settings on the fly.
@@ -174,8 +181,20 @@ Feel free to open an issue or submit a Pull Request on [GitHub](https://github.c
 
 ---
 
+## 💬 Community & Discord
+
+Join our Discord server to get early release notifications, discuss new features, report bugs, or chat with the community:
+
+<p align="center">
+  <a href="https://discord.gg/rQ9vADRJvQ">
+    <img src="https://img.shields.io/badge/Discord-Join%20Chat-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join Discord">
+  </a>
+</p>
+
+---
+
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
 
 <p align="center">Made with ❤️ for music lovers.</p>

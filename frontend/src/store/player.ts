@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { GetStatus, Pause, Stop, SeekTo, SetVolume, PlayTrack } from '../../wailsjs/go/main/App'
+import { GetStatus, Pause, Stop, SeekTo, SetVolume, PlayTrack, IsCurrentTrackSaved, SaveCurrentStreamedTrack } from '../../wailsjs/go/main/App'
+import { EventsOn } from '../../wailsjs/runtime/runtime'
 
 export interface PlayerStatus {
   state: 'playing' | 'paused' | 'stopped'
@@ -48,6 +49,8 @@ export const usePlayerStore = defineStore('player', () => {
   const playlist = ref<QueueTrack[]>([])
   const currentIndex = ref<number>(-1)
   const isCoverFullscreen = ref<boolean>(false)
+  const isCurrentSaved = ref<boolean>(false)
+  const isSavingTrack = ref<boolean>(false)
 
   // Shuffle queue & history for non-repeating shuffle cycle with backward navigation
   const unplayedIndices = ref<number[]>([])
@@ -89,7 +92,47 @@ export const usePlayerStore = defineStore('player', () => {
   let lastState = 'stopped'
   let volumeInitialized = false
 
+  async function checkIfCurrentSaved() {
+    const tr = status.value.track
+    if (!tr) {
+      isCurrentSaved.value = false
+      return
+    }
+    if (!tr.infoHash || tr.infoHash === 'local') {
+      isCurrentSaved.value = true
+      return
+    }
+    try {
+      isCurrentSaved.value = await IsCurrentTrackSaved()
+    } catch {
+      isCurrentSaved.value = false
+    }
+  }
+
+  async function saveCurrentTrack(): Promise<boolean> {
+    if (isSavingTrack.value) return false
+    isSavingTrack.value = true
+    try {
+      const res = await SaveCurrentStreamedTrack()
+      if (res && res.id) {
+        isCurrentSaved.value = true
+        return true
+      }
+      return false
+    } finally {
+      isSavingTrack.value = false
+    }
+  }
+
+  let eventsRegistered = false
   function startPolling() {
+    if (!eventsRegistered) {
+      eventsRegistered = true
+      EventsOn('player:ended', () => {
+        handleTrackEnded()
+      })
+    }
+
     pollInterval = setInterval(async () => {
       try {
         if (!volumeInitialized) {
@@ -100,9 +143,14 @@ export const usePlayerStore = defineStore('player', () => {
         const s = (await GetStatus()) as PlayerStatus
         const prev = lastState
         lastState = s.state
+        const trackChanged = (s.track?.filePath !== status.value.track?.filePath) || (s.track?.infoHash !== status.value.track?.infoHash)
         status.value = {
           ...s,
           volume: status.value.volume
+        }
+
+        if (trackChanged) {
+          checkIfCurrentSaved()
         }
 
         // Track finished naturally (was playing, now stopped)
@@ -113,16 +161,28 @@ export const usePlayerStore = defineStore('player', () => {
     }, 500)
   }
 
+  let isHandlingEnd = false
   async function handleTrackEnded() {
-    if (repeatMode.value === 'one' && status.value.track) {
-      // Repeat same song
-      await PlayTrack(status.value.track.infoHash, status.value.track.filePath)
-    } else if (repeatMode.value === 'all' || isShuffled.value) {
-      // Repeat playlist or shuffle: play next
-      await playNext()
-    } else if (currentIndex.value < playlist.value.length - 1) {
-      // Play next song until end of list
-      await playNext()
+    if (isHandlingEnd) return
+    isHandlingEnd = true
+    try {
+      if (repeatMode.value === 'one' && status.value.track) {
+        // Repeat same song
+        await PlayTrack(status.value.track.infoHash, status.value.track.filePath)
+      } else if (repeatMode.value === 'all' || isShuffled.value) {
+        // Repeat playlist or shuffle: play next
+        await playNext()
+      } else if (currentIndex.value < playlist.value.length - 1) {
+        // Play next song until end of list
+        await playNext()
+      } else {
+        // Reached end of playback queue: cleanly stop and reset
+        await stop()
+      }
+    } finally {
+      setTimeout(() => {
+        isHandlingEnd = false
+      }, 300)
     }
   }
 
@@ -223,14 +283,38 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   async function togglePause() {
+    if (status.value.state === 'stopped') {
+      const track = currentQueueTrack.value || status.value.track
+      if (track) {
+        await play(track.infoHash, track.filePath)
+        return
+      }
+      if (playlist.value.length > 0) {
+        currentIndex.value = 0
+        const first = playlist.value[0]
+        await play(first.infoHash, first.filePath)
+        return
+      }
+      return
+    }
     await Pause()
   }
 
   async function stop() {
     await Stop()
+    status.value.state = 'stopped'
+    status.value.positionSec = 0
   }
 
   async function seek(seconds: number) {
+    if (status.value.state === 'stopped') {
+      const track = currentQueueTrack.value || status.value.track
+      if (track) {
+        await play(track.infoHash, track.filePath)
+        await SeekTo(seconds)
+        return
+      }
+    }
     await SeekTo(seconds)
   }
 
@@ -297,6 +381,10 @@ export const usePlayerStore = defineStore('player', () => {
     seek,
     setVolume,
     toggleRepeat,
-    toggleShuffle
+    toggleShuffle,
+    isCurrentSaved,
+    isSavingTrack,
+    checkIfCurrentSaved,
+    saveCurrentTrack
   }
 })

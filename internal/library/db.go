@@ -5,6 +5,7 @@ package library
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,6 +36,14 @@ type Playlist struct {
 	Name      string    `json:"name"`
 	CreatedAt time.Time `json:"createdAt"`
 	Tracks    []Track   `json:"tracks,omitempty"`
+}
+
+// Folder represents a registered directory indexed by the library.
+type Folder struct {
+	ID        int64     `json:"id"`
+	Path      string    `json:"path"`
+	IsDefault bool      `json:"isDefault"`
+	AddedAt   time.Time `json:"addedAt"`
 }
 
 // DB wraps a SQLite database for library operations.
@@ -91,6 +100,13 @@ func (l *DB) migrate() error {
 		track_id    INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
 		position    INTEGER NOT NULL,
 		PRIMARY KEY (playlist_id, track_id)
+	);
+
+	CREATE TABLE IF NOT EXISTS library_folders (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		path       TEXT NOT NULL UNIQUE,
+		is_default INTEGER DEFAULT 0,
+		added_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_tracks_info_hash ON tracks(info_hash);
@@ -228,6 +244,35 @@ func (l *DB) GetTrackByPath(filePath string) (*Track, error) {
 	return t, nil
 }
 
+// HasTrack checks whether a track with given filePath or infoHash+fileName already exists in the library.
+func (l *DB) HasTrack(infoHash, filePath string) bool {
+	if filePath == "" && infoHash == "" {
+		return false
+	}
+	base := filepath.Base(filePath)
+	var count int
+	_ = l.db.QueryRow(`
+		SELECT COUNT(1) FROM tracks
+		WHERE file_path = ? OR file_path LIKE ? OR (info_hash != '' AND info_hash = ? AND (file_name = ? OR file_path = ?))`,
+		filePath, "%"+base, infoHash, base, filePath).Scan(&count)
+	return count > 0
+}
+
+// FindTrackByFileName returns a track matching the given filename.
+func (l *DB) FindTrackByFileName(fileName string) (*Track, error) {
+	row := l.db.QueryRow(`
+		SELECT id, info_hash, file_path, file_name, title, artist, album,
+		       year, genre, duration_sec, size_bytes, cover_path, favourite, added_at
+		FROM tracks WHERE file_name = ? LIMIT 1`, fileName)
+	t := &Track{}
+	err := row.Scan(&t.ID, &t.InfoHash, &t.FilePath, &t.FileName, &t.Title, &t.Artist, &t.Album,
+		&t.Year, &t.Genre, &t.DurationSec, &t.SizeByes, &t.CoverPath, &t.Favourite, &t.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
 // UpdateTrackDuration updates duration_sec for a track.
 func (l *DB) UpdateTrackDuration(id int64, durationSec float64) error {
 	_, err := l.db.Exec(`UPDATE tracks SET duration_sec = ? WHERE id = ?`, durationSec, id)
@@ -243,6 +288,16 @@ func (l *DB) UpdateTrackDurationByPath(filePath string, durationSec float64) err
 // UpdateTrackCover updates cover_path for a track.
 func (l *DB) UpdateTrackCover(id int64, coverPath string) error {
 	_, err := l.db.Exec(`UPDATE tracks SET cover_path = ? WHERE id = ?`, coverPath, id)
+	return err
+}
+
+// UpdateTrackMetadata updates title, artist, album, year, and genre in the tracks table.
+func (l *DB) UpdateTrackMetadata(id int64, title, artist, album string, year int, genre string) error {
+	_, err := l.db.Exec(`
+		UPDATE tracks
+		SET title = ?, artist = ?, album = ?, year = ?, genre = ?
+		WHERE id = ?`,
+		title, artist, album, year, genre, id)
 	return err
 }
 
@@ -336,6 +391,168 @@ func (l *DB) ListPlaylists() ([]Playlist, error) {
 // DeletePlaylist removes a playlist and all its track associations.
 func (l *DB) DeletePlaylist(playlistID int64) error {
 	_, err := l.db.Exec(`DELETE FROM playlists WHERE id = ?`, playlistID)
+	return err
+}
+
+// GetPlaylist returns a playlist with its tracks.
+func (l *DB) GetPlaylist(playlistID int64) (*Playlist, error) {
+	row := l.db.QueryRow(`SELECT id, name, created_at FROM playlists WHERE id = ?`, playlistID)
+	var p Playlist
+	if err := row.Scan(&p.ID, &p.Name, &p.CreatedAt); err != nil {
+		return nil, err
+	}
+	tracks, err := l.GetPlaylistTracks(playlistID)
+	if err == nil {
+		p.Tracks = tracks
+	}
+	return &p, nil
+}
+
+// ExportPlaylistM3U formats the playlist as Extended M3U text (UTF-8).
+func (l *DB) ExportPlaylistM3U(playlistID int64) (string, error) {
+	tracks, err := l.GetPlaylistTracks(playlistID)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	sb.WriteString("#EXTM3U\n")
+	for _, t := range tracks {
+		duration := int(t.DurationSec)
+		if duration <= 0 {
+			duration = -1
+		}
+		displayName := t.Title
+		if displayName == "" {
+			displayName = t.FileName
+		}
+		if t.Artist != "" {
+			displayName = fmt.Sprintf("%s - %s", t.Artist, displayName)
+		}
+		sb.WriteString(fmt.Sprintf("#EXTINF:%d,%s\n", duration, displayName))
+		sb.WriteString(t.FilePath + "\n")
+	}
+	return sb.String(), nil
+}
+
+// FindTrackByTitleArtist searches for a track by artist and title in the local library.
+func (l *DB) FindTrackByTitleArtist(title, artist string) (*Track, error) {
+	title = strings.TrimSpace(title)
+	artist = strings.TrimSpace(artist)
+	if title == "" && artist == "" {
+		return nil, sql.ErrNoRows
+	}
+
+	var row *sql.Row
+	if title != "" && artist != "" {
+		row = l.db.QueryRow(`
+			SELECT id, info_hash, file_path, file_name, title, artist, album,
+			       year, genre, duration_sec, size_bytes, cover_path, favourite, added_at
+			FROM tracks
+			WHERE LOWER(title) = LOWER(?) AND LOWER(artist) = LOWER(?)
+			LIMIT 1`, title, artist)
+	} else if title != "" {
+		row = l.db.QueryRow(`
+			SELECT id, info_hash, file_path, file_name, title, artist, album,
+			       year, genre, duration_sec, size_bytes, cover_path, favourite, added_at
+			FROM tracks
+			WHERE LOWER(title) = LOWER(?) OR LOWER(file_name) LIKE LOWER(?)
+			LIMIT 1`, title, "%"+title+"%")
+	}
+	if row == nil {
+		return nil, sql.ErrNoRows
+	}
+	t := &Track{}
+	err := row.Scan(&t.ID, &t.InfoHash, &t.FilePath, &t.FileName, &t.Title, &t.Artist, &t.Album,
+		&t.Year, &t.Genre, &t.DurationSec, &t.SizeByes, &t.CoverPath, &t.Favourite, &t.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+// AddFolder adds a new library folder to scan.
+func (l *DB) AddFolder(path string, isDefault bool) (int64, error) {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" {
+		return 0, fmt.Errorf("empty folder path")
+	}
+	defVal := 0
+	if isDefault {
+		defVal = 1
+	}
+	res, err := l.db.Exec(`
+		INSERT INTO library_folders (path, is_default)
+		VALUES (?, ?)
+		ON CONFLICT(path) DO UPDATE SET is_default = CASE WHEN excluded.is_default = 1 THEN 1 ELSE library_folders.is_default END
+	`, path, defVal)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// RemoveFolder removes a library folder by ID.
+func (l *DB) RemoveFolder(id int64) (string, error) {
+	var folderPath string
+	var isDefault int
+	err := l.db.QueryRow(`SELECT path, is_default FROM library_folders WHERE id = ?`, id).Scan(&folderPath, &isDefault)
+	if err != nil {
+		return "", err
+	}
+	if isDefault == 1 {
+		return "", fmt.Errorf("cannot remove default library folder")
+	}
+	_, err = l.db.Exec(`DELETE FROM library_folders WHERE id = ?`, id)
+	return folderPath, err
+}
+
+// GetFolder returns a library folder by ID.
+func (l *DB) GetFolder(id int64) (*Folder, error) {
+	var f Folder
+	var isDef int
+	err := l.db.QueryRow(`SELECT id, path, is_default, added_at FROM library_folders WHERE id = ?`, id).Scan(&f.ID, &f.Path, &isDef, &f.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	f.IsDefault = (isDef == 1)
+	return &f, nil
+}
+
+// ListFolders returns all registered library folders.
+func (l *DB) ListFolders() ([]Folder, error) {
+	rows, err := l.db.Query(`SELECT id, path, is_default, added_at FROM library_folders ORDER BY is_default DESC, added_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var folders []Folder
+	for rows.Next() {
+		var f Folder
+		var isDef int
+		if err := rows.Scan(&f.ID, &f.Path, &isDef, &f.AddedAt); err != nil {
+			return nil, err
+		}
+		f.IsDefault = (isDef == 1)
+		folders = append(folders, f)
+	}
+	return folders, nil
+}
+
+// DeleteTracksInFolder removes all tracks belonging to a folder path from the library database.
+func (l *DB) DeleteTracksInFolder(folderPath string) error {
+	folderPath = filepath.Clean(folderPath)
+	sep := string(filepath.Separator)
+	prefix := folderPath
+	if !strings.HasSuffix(prefix, sep) {
+		prefix += sep
+	}
+	_, _ = l.db.Exec(`
+		DELETE FROM playlist_tracks WHERE track_id IN (
+			SELECT id FROM tracks WHERE file_path LIKE ? || '%'
+		)
+	`, prefix)
+	_, err := l.db.Exec(`DELETE FROM tracks WHERE file_path LIKE ? || '%'`, prefix)
 	return err
 }
 

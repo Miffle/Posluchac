@@ -19,6 +19,7 @@ import (
 
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/user/torrent-player/internal/audio"
+	"github.com/user/torrent-player/internal/discord"
 	"github.com/user/torrent-player/internal/hotkeys"
 	"github.com/user/torrent-player/internal/library"
 	"github.com/user/torrent-player/internal/lyrics"
@@ -27,6 +28,7 @@ import (
 	"github.com/user/torrent-player/internal/sources"
 	torrentpkg "github.com/user/torrent-player/internal/torrent"
 	"github.com/user/torrent-player/internal/updater"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App holds all backend services and is bound to the Wails runtime.
@@ -42,6 +44,7 @@ type App struct {
 	rutracker    *search.RutrackerSearcher
 	lyrics       *lyrics.Client
 	hotkeys      *hotkeys.Manager
+	discord      *discord.Client
 	dataDir      string
 	downloadDir  string
 	readySources chan struct{}
@@ -70,6 +73,7 @@ func NewApp() *App {
 		dataDir:      dataDir,
 		downloadDir:  dlDir,
 		lyrics:       lyrics.NewClient(),
+		discord:      discord.NewClient(""),
 		readySources: make(chan struct{}),
 	}
 }
@@ -92,6 +96,7 @@ func (a *App) startup(ctx context.Context) {
 
 	var sqlDB *sql.DB
 	if a.library != nil {
+		_, _ = a.library.AddFolder(dlDir, true)
 		sqlDB = a.library.SQLDB()
 		var sErr error
 		a.sources, sErr = sources.NewManager(sqlDB)
@@ -113,6 +118,15 @@ func (a *App) startup(ctx context.Context) {
 	a.player, err = audio.NewPlayer()
 	if err != nil {
 		fmt.Println("audio player error:", err)
+	} else {
+		a.player.SetOnTrackEnded(func() {
+			if a.discord != nil {
+				a.discord.ClearActivity()
+			}
+			if a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "player:ended")
+			}
+		})
 	}
 
 	// Build search backends
@@ -126,6 +140,14 @@ func (a *App) startup(ctx context.Context) {
 
 	// Start global media hotkeys listener (Fn+F7/F8/F9 etc.)
 	a.hotkeys = hotkeys.Start(a.ctx)
+
+	// Load Discord RPC preferences from app_settings
+	if sqlDB != nil {
+		var rpcEnabledStr string
+		if err := sqlDB.QueryRow(`SELECT value FROM app_settings WHERE key = 'discord_rpc_enabled'`).Scan(&rpcEnabledStr); err == nil {
+			a.discord.SetEnabled(rpcEnabledStr != "false" && rpcEnabledStr != "0")
+		}
+	}
 
 	// Run initial library scan and background watcher for Music/TorrentPlayer
 	go func() {
@@ -146,6 +168,9 @@ func (a *App) shutdown(_ context.Context) {
 	}
 	if a.sources != nil {
 		a.sources.Stop()
+	}
+	if a.discord != nil {
+		a.discord.Close()
 	}
 	a.player.Stop()
 	a.engine.Close()
@@ -305,16 +330,40 @@ func (a *App) Search(query string, formatFilter string) []search.Result {
 	}
 
 	scraperResults := a.searcher.Search(a.ctx, scraperQuery, 30)
-	if formatFilter != "" && formatFilter != "all" {
-		var filtered []search.Result
-		for _, r := range scraperResults {
-			if sources.MatchesFormat(r.Title, formatFilter) {
-				filtered = append(filtered, r)
+
+	// Filter external scraper results for relevance and format constraints
+	queryTokens := sources.ExtractTokens(cleanQuery)
+	var requiredTokens []string
+	for _, tok := range queryTokens {
+		tLower := strings.ToLower(tok)
+		if !sources.IsFormatStopword(tLower) && len(tok) >= 3 {
+			requiredTokens = append(requiredTokens, tLower)
+		}
+	}
+
+	var validScraperResults []search.Result
+	for _, r := range scraperResults {
+		if formatFilter != "" && formatFilter != "all" && !sources.MatchesFormat(r.Title, formatFilter) {
+			continue
+		}
+		// For multi-word queries (e.g. "Baby Cute"), ensure all required tokens are present in the title
+		if len(requiredTokens) >= 2 {
+			rTitleLower := strings.ToLower(r.Title)
+			matchedAll := true
+			for _, tok := range requiredTokens {
+				if !strings.Contains(rTitleLower, tok) {
+					matchedAll = false
+					break
+				}
+			}
+			if !matchedAll {
+				continue
 			}
 		}
-		scraperResults = filtered
+		validScraperResults = append(validScraperResults, r)
 	}
-	results = append(results, scraperResults...)
+
+	results = append(results, validScraperResults...)
 	return results
 }
 
@@ -609,6 +658,31 @@ func (a *App) RemoveTorrent(infoHash string, deleteFiles bool) error {
 	return a.engine.RemoveTorrent(infoHash, deleteFiles)
 }
 
+// SpeedLimits holds bandwidth limitations in KB/s (0 = unlimited).
+type SpeedLimits struct {
+	DownloadKBps int `json:"downloadKBps"`
+	UploadKBps   int `json:"uploadKBps"`
+}
+
+// GetTorrentSpeedLimits returns the current download and upload speed limits in KB/s.
+func (a *App) GetTorrentSpeedLimits() SpeedLimits {
+	if a.engine == nil {
+		return SpeedLimits{}
+	}
+	dl, ul := a.engine.GetSpeedLimits()
+	return SpeedLimits{DownloadKBps: dl, UploadKBps: ul}
+}
+
+// SetTorrentSpeedLimits configures download and upload speed limits in KB/s (0 = unlimited).
+func (a *App) SetTorrentSpeedLimits(downloadKBps, uploadKBps int) error {
+	if a.engine == nil {
+		return fmt.Errorf("torrent engine not initialized")
+	}
+	a.engine.SetDownloadLimit(downloadKBps)
+	a.engine.SetUploadLimit(uploadKBps)
+	return nil
+}
+
 // ─── Playback ────────────────────────────────────────────────────────────────
 
 // PlayTrack streams and plays a file from a torrent or local disk file.
@@ -696,27 +770,103 @@ func (a *App) PlayTrack(infoHash, filePath string) error {
 	}
 
 	playErr := a.player.Play(r, ext, track)
-	if playErr == nil && a.library != nil {
-		go func(dp string) {
-			time.Sleep(500 * time.Millisecond)
-			st := a.player.Status()
-			if st.DurationSec > 0 {
+	if playErr == nil {
+		go func(dp string, tr audio.TrackInfo) {
+			var st audio.Status
+			for i := 0; i < 15; i++ {
+				time.Sleep(150 * time.Millisecond)
+				st = a.player.Status()
+				if st.DurationSec > 0 {
+					break
+				}
+			}
+			if st.DurationSec > 0 && a.library != nil {
 				_ = a.library.UpdateTrackDurationByPath(dp, st.DurationSec)
 			}
-		}(diskPath)
+			a.updateDiscordActivity(&tr, st.PositionSec, st.DurationSec)
+		}(diskPath, track)
 	}
 
 	return playErr
 }
 
 // Pause toggles pause/resume of playback.
-func (a *App) Pause() { a.player.Pause() }
+func (a *App) Pause() {
+	a.player.Pause()
+	st := a.player.Status()
+	if st.State == audio.StatePaused || st.State == audio.StateStopped {
+		if a.discord != nil {
+			a.discord.ClearActivity()
+		}
+	} else if st.State == audio.StatePlaying && st.Track != nil {
+		a.updateDiscordActivity(st.Track, st.PositionSec, st.DurationSec)
+	}
+}
 
 // Stop stops playback.
-func (a *App) Stop() { a.player.Stop() }
+func (a *App) Stop() {
+	a.player.Stop()
+	if a.discord != nil {
+		a.discord.ClearActivity()
+	}
+}
+
+// GetDiscordRPCEnabled returns true if Discord Rich Presence is enabled.
+func (a *App) GetDiscordRPCEnabled() bool {
+	if a.discord == nil {
+		return false
+	}
+	return a.discord.IsEnabled()
+}
+
+// SetDiscordRPCEnabled enables or disables Discord Rich Presence and saves the preference.
+func (a *App) SetDiscordRPCEnabled(enabled bool) error {
+	if a.discord != nil {
+		a.discord.SetEnabled(enabled)
+	}
+	if a.library != nil && a.library.SQLDB() != nil {
+		val := "1"
+		if !enabled {
+			val = "0"
+		}
+		_, _ = a.library.SQLDB().Exec(`
+			INSERT INTO app_settings (key, value) VALUES ('discord_rpc_enabled', ?)
+			ON CONFLICT(key) DO UPDATE SET value = excluded.value`, val)
+	}
+	if enabled {
+		st := a.player.Status()
+		if st.State == audio.StatePlaying && st.Track != nil {
+			go a.updateDiscordActivity(st.Track, st.PositionSec, st.DurationSec)
+		}
+	}
+	return nil
+}
+
+func (a *App) updateDiscordActivity(track *audio.TrackInfo, pos, dur float64) {
+	if a.discord == nil || track == nil {
+		return
+	}
+	_ = a.discord.SetActivity(discord.TrackActivity{
+		Title:       track.Title,
+		Artist:      track.Artist,
+		Album:       track.Album,
+		CoverURL:    track.CoverPath,
+		PositionSec: pos,
+		DurationSec: dur,
+	})
+}
 
 // SeekTo seeks to the given position in seconds.
-func (a *App) SeekTo(seconds float64) error { return a.player.SeekTo(seconds) }
+func (a *App) SeekTo(seconds float64) error {
+	err := a.player.SeekTo(seconds)
+	if err == nil {
+		st := a.player.Status()
+		if a.discord != nil && st.State == audio.StatePlaying && st.Track != nil {
+			go a.updateDiscordActivity(st.Track, seconds, st.DurationSec)
+		}
+	}
+	return err
+}
 
 // SetVolume sets volume in [0.0, 1.0].
 func (a *App) SetVolume(v float64) { a.player.SetVolume(v) }
@@ -744,6 +894,48 @@ func (a *App) GetFavourites() ([]library.Track, error) {
 // ToggleFavourite flips the favourite flag for a track.
 func (a *App) ToggleFavourite(trackID int64) error {
 	return a.library.ToggleFavourite(trackID)
+}
+
+// UpdateTrackMetadata updates virtual metadata in SQLite and optionally writes ID3 tags to disk.
+func (a *App) UpdateTrackMetadata(trackID int64, title, artist, album string, year int, genre string, writeToFile bool) (*library.Track, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+
+	track, err := a.library.GetTrack(trackID)
+	if err != nil || track == nil {
+		return nil, fmt.Errorf("track not found")
+	}
+
+	title = strings.TrimSpace(title)
+	artist = strings.TrimSpace(artist)
+	album = strings.TrimSpace(album)
+	genre = strings.TrimSpace(genre)
+
+	// 1. Update virtual tags in SQLite database
+	if err := a.library.UpdateTrackMetadata(trackID, title, artist, album, year, genre); err != nil {
+		return nil, fmt.Errorf("update database: %w", err)
+	}
+
+	// 2. If requested, write tags directly to the physical audio file on disk
+	if writeToFile && track.FilePath != "" {
+		if _, statErr := os.Stat(track.FilePath); statErr == nil {
+			_ = metadata.WriteFileTags(track.FilePath, title, artist, album, year, genre)
+		}
+	}
+
+	// 3. If this track is currently playing in the audio player, update player's status & Discord RPC
+	st := a.player.Status()
+	if st.Track != nil && (st.Track.FilePath == track.FilePath || st.Track.FileName == track.FileName) {
+		st.Track.Title = title
+		st.Track.Artist = artist
+		st.Track.Album = album
+		if a.discord != nil && st.State == audio.StatePlaying {
+			go a.updateDiscordActivity(st.Track, st.PositionSec, st.DurationSec)
+		}
+	}
+
+	return a.library.GetTrack(trackID)
 }
 
 // ImportTrackToLibrary reads metadata from a torrent file and saves it to the library.
@@ -780,6 +972,115 @@ func (a *App) ImportTrackToLibrary(infoHash, filePath string) (library.Track, er
 	}
 	track.ID = id
 	return track, nil
+}
+
+// IsCurrentTrackSaved returns true if the current playing track is already saved in the local library.
+func (a *App) IsCurrentTrackSaved() bool {
+	st := a.player.Status()
+	if st.Track == nil || a.library == nil {
+		return false
+	}
+	// If it's explicitly local
+	if st.Track.InfoHash == "" || st.Track.InfoHash == "local" {
+		return true
+	}
+	// Check if already in library by infoHash and path
+	if a.library.HasTrack(st.Track.InfoHash, st.Track.FilePath) {
+		return true
+	}
+	// Check if exported file exists on disk and is in library
+	diskPath := filepath.Join(a.downloadDir, st.Track.FilePath)
+	if t, err := a.library.GetTrackByPath(diskPath); err == nil && t != nil {
+		return true
+	}
+	return false
+}
+
+// SaveCurrentStreamedTrack completely downloads the currently streamed torrent track,
+// exports it to the music directory, and registers it in the library.
+func (a *App) SaveCurrentStreamedTrack() (*library.Track, error) {
+	st := a.player.Status()
+	if st.Track == nil {
+		return nil, fmt.Errorf("no track currently playing")
+	}
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+
+	infoHash := st.Track.InfoHash
+	filePath := st.Track.FilePath
+
+	// If already a local file
+	if infoHash == "" || infoHash == "local" {
+		if t, err := a.library.GetTrackByPath(filePath); err == nil && t != nil {
+			return t, nil
+		}
+		// If on disk, import it
+		if fi, err := os.Stat(filePath); err == nil && !fi.IsDir() {
+			imp, impErr := a.ImportTrackToLibrary("", filePath)
+			if impErr == nil {
+				return &imp, nil
+			}
+		}
+		return nil, fmt.Errorf("track is already local")
+	}
+
+	// Streamed from a torrent: ensure file is downloaded and exported
+	exportedPath, err := a.engine.ExportStreamedFile(infoHash, filePath, a.downloadDir, 60*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("export track: %w", err)
+	}
+
+	// Read metadata from newly exported file
+	tags, _ := metadata.ReadFile(exportedPath)
+	if tags == nil {
+		tags = &metadata.Tags{}
+	}
+
+	fileName := filepath.Base(exportedPath)
+	artist, album, title, year := parseSmartAudioInfo(a.downloadDir, exportedPath, tags)
+
+	var durationSec float64
+	if st.DurationSec > 0 {
+		durationSec = st.DurationSec
+	} else {
+		durationSec = audio.GetFileDuration(exportedPath)
+	}
+
+	var sizeBytes int64
+	if fi, statErr := os.Stat(exportedPath); statErr == nil {
+		sizeBytes = fi.Size()
+	}
+
+	coverPath := findCoverInDir(filepath.Dir(exportedPath))
+	if coverPath == "" && tags != nil && len(tags.CoverData) > 0 {
+		coverPath, _ = metadata.SaveCover(tags, exportedPath)
+	}
+	if coverPath == "" && st.Track.CoverPath != "" {
+		coverPath = st.Track.CoverPath
+	}
+
+	track := library.Track{
+		InfoHash:    "local",
+		FilePath:    exportedPath,
+		FileName:    fileName,
+		Title:       title,
+		Artist:      artist,
+		Album:       album,
+		Year:        year,
+		Genre:       tags.Genre,
+		DurationSec: durationSec,
+		SizeByes:    sizeBytes,
+		CoverPath:   coverPath,
+	}
+
+	trackID, err := a.library.AddTrack(track)
+	if err != nil {
+		return nil, fmt.Errorf("add track to library: %w", err)
+	}
+	track.ID = trackID
+
+	return &track, nil
 }
 
 // ─── Playlists ────────────────────────────────────────────────────────────────
@@ -823,6 +1124,147 @@ func (a *App) GetPlaylistsForTrack(trackID int64) ([]int64, error) {
 		return nil, fmt.Errorf("library not initialized")
 	}
 	return a.library.GetPlaylistsForTrack(trackID)
+}
+
+// ExportPlaylist prompts the user to save the playlist to an .m3u8 file and writes it.
+func (a *App) ExportPlaylist(playlistID int64) (string, error) {
+	if a.library == nil {
+		return "", fmt.Errorf("library not initialized")
+	}
+	p, err := a.library.GetPlaylist(playlistID)
+	if err != nil {
+		return "", fmt.Errorf("playlist not found: %w", err)
+	}
+
+	defaultName := strings.TrimSpace(p.Name)
+	if defaultName == "" {
+		defaultName = "playlist"
+	}
+	reg := regexp.MustCompile(`[\\/:*?"<>|]`)
+	defaultName = reg.ReplaceAllString(defaultName, "_") + ".m3u8"
+
+	filePath, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Экспорт плейлиста / Export Playlist",
+		DefaultFilename: defaultName,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "M3U8 Playlist (*.m3u8)", Pattern: "*.m3u8"},
+			{DisplayName: "M3U Playlist (*.m3u)", Pattern: "*.m3u"},
+		},
+	})
+	if err != nil || filePath == "" {
+		return "", err
+	}
+
+	content, err := a.library.ExportPlaylistM3U(playlistID)
+	if err != nil {
+		return "", fmt.Errorf("generate m3u: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write file: %w", err)
+	}
+
+	return filePath, nil
+}
+
+// ImportPlaylist prompts the user to pick an .m3u / .m3u8 file and imports it into a new playlist.
+func (a *App) ImportPlaylist() (*library.Playlist, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Импорт плейлиста / Import Playlist",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Плейлисты (*.m3u, *.m3u8)", Pattern: "*.m3u;*.m3u8"},
+		},
+	})
+	if err != nil || filePath == "" {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read playlist file: %w", err)
+	}
+
+	baseName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	if baseName == "" {
+		baseName = "Imported Playlist"
+	}
+
+	playlistID, err := a.library.CreatePlaylist(baseName)
+	if err != nil {
+		return nil, fmt.Errorf("create playlist: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var lastExtInfTitle string
+	var lastExtInfArtist string
+	position := 1
+	dir := filepath.Dir(filePath)
+
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#EXTINF:") {
+			infoPart := strings.TrimPrefix(line, "#EXTINF:")
+			commaIdx := strings.Index(infoPart, ",")
+			if commaIdx != -1 {
+				trackName := strings.TrimSpace(infoPart[commaIdx+1:])
+				if dashIdx := strings.Index(trackName, " - "); dashIdx != -1 {
+					lastExtInfArtist = strings.TrimSpace(trackName[:dashIdx])
+					lastExtInfTitle = strings.TrimSpace(trackName[dashIdx+3:])
+				} else {
+					lastExtInfArtist = ""
+					lastExtInfTitle = trackName
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		trackFilePath := line
+		if !filepath.IsAbs(trackFilePath) {
+			trackFilePath = filepath.Join(dir, trackFilePath)
+		}
+
+		var matchedTrack *library.Track
+
+		// 1. Try exact path match in library
+		if t, err := a.library.GetTrackByPath(trackFilePath); err == nil && t != nil {
+			matchedTrack = t
+		}
+
+		// 2. If not in library, check if file exists on disk and import it
+		if matchedTrack == nil {
+			if fi, statErr := os.Stat(trackFilePath); statErr == nil && !fi.IsDir() {
+				if imported, impErr := a.ImportTrackToLibrary("", trackFilePath); impErr == nil {
+					matchedTrack = &imported
+				}
+			}
+		}
+
+		// 3. If file not on disk (different computer/path), match by artist/title
+		if matchedTrack == nil && (lastExtInfTitle != "" || lastExtInfArtist != "") {
+			if t, findErr := a.library.FindTrackByTitleArtist(lastExtInfTitle, lastExtInfArtist); findErr == nil && t != nil {
+				matchedTrack = t
+			}
+		}
+
+		if matchedTrack != nil {
+			_ = a.library.AddToPlaylist(playlistID, matchedTrack.ID, position)
+			position++
+		}
+
+		lastExtInfTitle = ""
+		lastExtInfArtist = ""
+	}
+
+	return a.library.GetPlaylist(playlistID)
 }
 
 // ─── Files and Folders ────────────────────────────────────────────────────────
@@ -931,65 +1373,130 @@ func (a *App) ScanLibrary() (int, error) {
 		}
 	}
 
-	// 2. Scan for new and completed audio files
+	// 2. Scan for new and completed audio files across all registered library folders
+	folders, _ := a.library.ListFolders()
+	var folderPaths []string
+	for _, f := range folders {
+		folderPaths = append(folderPaths, f.Path)
+	}
+	if len(folderPaths) == 0 {
+		folderPaths = []string{a.downloadDir}
+	}
+
 	count := 0
-	err = filepath.WalkDir(a.downloadDir, func(path string, d os.DirEntry, walkErr error) error {
-		if walkErr != nil || d.IsDir() {
+	for _, fPath := range folderPaths {
+		if _, statErr := os.Stat(fPath); os.IsNotExist(statErr) {
+			continue
+		}
+		_ = filepath.WalkDir(fPath, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil || d.IsDir() {
+				return nil
+			}
+
+			if !isAudioExtension(path) {
+				return nil
+			}
+
+			fi, err := d.Info()
+			if err != nil || fi.Size() == 0 {
+				return nil
+			}
+
+			// If track is already indexed, keep existing (and potentially edited) metadata intact
+			if _, exists := existingByPath[path]; exists {
+				return nil
+			}
+
+			// Read ID3 or FLAC metadata
+			tags, _ := metadata.ReadFile(path)
+			if tags == nil {
+				tags = &metadata.Tags{}
+			}
+
+			fileName := filepath.Base(path)
+			artist, album, title, year := parseSmartAudioInfo(fPath, path, tags)
+
+			var durationSec float64
+			if ex, exists := existingByPath[path]; exists && ex.DurationSec > 0 {
+				durationSec = ex.DurationSec
+			} else {
+				durationSec = audio.GetFileDuration(path)
+			}
+
+			coverPath := findCoverInDir(filepath.Dir(path))
+			if coverPath == "" && tags != nil && len(tags.CoverData) > 0 {
+				coverPath, _ = metadata.SaveCover(tags, path)
+			}
+
+			track := library.Track{
+				InfoHash:    "local",
+				FilePath:    path,
+				FileName:    fileName,
+				Title:       title,
+				Artist:      artist,
+				Album:       album,
+				Year:        year,
+				Genre:       tags.Genre,
+				SizeByes:    fi.Size(),
+				DurationSec: durationSec,
+				CoverPath:   coverPath,
+			}
+
+			_, addErr := a.library.AddTrack(track)
+			if addErr == nil {
+				count++
+			}
 			return nil
-		}
+		})
+	}
 
-		if !isAudioExtension(path) {
-			return nil
-		}
+	return count, nil
+}
 
-		fi, err := d.Info()
-		if err != nil || fi.Size() == 0 {
-			return nil
-		}
+// GetLibraryFolders returns all registered music library directories.
+func (a *App) GetLibraryFolders() ([]library.Folder, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+	return a.library.ListFolders()
+}
 
-		// Read ID3 or FLAC metadata
-		tags, _ := metadata.ReadFile(path)
-		if tags == nil {
-			tags = &metadata.Tags{}
-		}
+// AddLibraryFolder registers a directory for scanning into the music library.
+func (a *App) AddLibraryFolder(path string) (*library.Folder, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+	id, err := a.library.AddFolder(path, false)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		_, _ = a.ScanLibrary()
+	}()
+	return a.library.GetFolder(id)
+}
 
-		fileName := filepath.Base(path)
-		artist, album, title, year := parseSmartAudioInfo(a.downloadDir, path, tags)
+// RemoveLibraryFolder removes a folder from library scanning.
+// If removeTracks is true, tracks from this folder are also deleted from the library.
+func (a *App) RemoveLibraryFolder(id int64, removeTracks bool) error {
+	if a.library == nil {
+		return fmt.Errorf("library not initialized")
+	}
+	folderPath, err := a.library.RemoveFolder(id)
+	if err != nil {
+		return err
+	}
+	if removeTracks && folderPath != "" {
+		_ = a.library.DeleteTracksInFolder(folderPath)
+	}
+	return nil
+}
 
-		var durationSec float64
-		if ex, exists := existingByPath[path]; exists && ex.DurationSec > 0 {
-			durationSec = ex.DurationSec
-		} else {
-			durationSec = audio.GetFileDuration(path)
-		}
-
-		coverPath := findCoverInDir(filepath.Dir(path))
-		if coverPath == "" && tags != nil && len(tags.CoverData) > 0 {
-			coverPath, _ = metadata.SaveCover(tags, path)
-		}
-
-		track := library.Track{
-			InfoHash:    "local",
-			FilePath:    path,
-			FileName:    fileName,
-			Title:       title,
-			Artist:      artist,
-			Album:       album,
-			Year:        year,
-			Genre:       tags.Genre,
-			SizeByes:    fi.Size(),
-			DurationSec: durationSec,
-			CoverPath:   coverPath,
-		}
-
-		_, addErr := a.library.AddTrack(track)
-		if addErr == nil {
-			count++
-		}
-		return nil
+// ChooseLibraryFolderDialog opens the system folder selection dialog.
+func (a *App) ChooseLibraryFolderDialog() (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Выберите папку с музыкой / Select Music Folder",
 	})
-
-	return count, err
 }
 
 // parseSmartAudioInfo extracts artist, album, title and year from metadata tags or from file path and naming heuristics.
@@ -1197,11 +1704,13 @@ func (a *App) OpenExternalURL(url string) error {
 // ─── Lyrics (LRC) ────────────────────────────────────────────────────────────
 
 // GetLyrics searches for synchronized or plain lyrics from local files or LRCLIB.
-func (a *App) GetLyrics(artist, title, album string, durationSec float64, filePath string) (*lyrics.Result, error) {
+// Set force=true to bypass the in-memory cache and retry the API (e.g. after a transient error).
+func (a *App) GetLyrics(artist, title, album string, durationSec float64, filePath string, force bool) (*lyrics.Result, error) {
 	if a.lyrics == nil {
 		a.lyrics = lyrics.NewClient()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	// Enough headroom for 3 attempts × (8 s timeout + 800 ms delay)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return a.lyrics.GetLyrics(ctx, artist, title, album, durationSec, filePath)
+	return a.lyrics.GetLyrics(ctx, artist, title, album, durationSec, filePath, force)
 }

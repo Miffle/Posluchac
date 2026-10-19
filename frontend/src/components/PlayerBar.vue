@@ -1,9 +1,11 @@
 <script lang="ts" setup>
 import { usePlayerStore } from '../store/player'
+import { useDialogStore } from '../store/dialog'
 import { useI18n } from '../i18n'
 import { computed } from 'vue'
 
 const player = usePlayerStore()
+const dialog = useDialogStore()
 const { t } = useI18n()
 const s = computed(() => player.status)
 
@@ -20,7 +22,7 @@ const progress = computed(() => {
 })
 
 function onSeekClick(e: MouseEvent) {
-  if (s.value.state === 'stopped' || !s.value.durationSec) return
+  if (!s.value.durationSec) return
   const container = e.currentTarget as HTMLElement
   const bar = container.querySelector('.progress-bar') as HTMLElement
   if (!bar) return
@@ -84,6 +86,18 @@ function toggleMute() {
     player.setVolume(prevVolume || 0.8)
   }
 }
+
+async function handleSaveTrack() {
+  if (player.isCurrentSaved || player.isSavingTrack) return
+  try {
+    const ok = await player.saveCurrentTrack()
+    if (ok) {
+      dialog.toast(t('player.toastTrackSaved'), 'success')
+    }
+  } catch (err: any) {
+    dialog.toast(err?.message || String(err), 'error')
+  }
+}
 </script>
 
 <template>
@@ -119,6 +133,24 @@ function toggleMute() {
           <span v-else class="state-indicator stopped">{{ t('player.noTrack') }}</span>
         </div>
       </div>
+
+      <!-- Save Streamed Track Button -->
+      <button
+        v-if="s.track && s.state !== 'stopped'"
+        class="save-stream-btn"
+        :class="{
+          'is-saved': player.isCurrentSaved,
+          'is-saving': player.isSavingTrack,
+          'can-save': !player.isCurrentSaved
+        }"
+        :disabled="player.isCurrentSaved || player.isSavingTrack"
+        @click="handleSaveTrack"
+        :title="player.isCurrentSaved ? t('player.savedInLibrary') : (player.isSavingTrack ? t('player.savingTrack') : t('player.saveTrackBtn'))"
+      >
+        <span v-if="player.isSavingTrack" class="btn-spinner">⏳</span>
+        <span v-else-if="player.isCurrentSaved" class="btn-check">✓</span>
+        <span v-else class="btn-save-icon">💾</span>
+      </button>
     </div>
 
     <!-- Controls + progress -->
@@ -137,7 +169,7 @@ function toggleMute() {
         <button
           class="ctrl-btn"
           @click="player.playPrev()"
-          :disabled="s.state === 'stopped'"
+          :disabled="player.playlist.length === 0"
           :title="t('player.prevTrack')"
         >
           ⏮
@@ -147,7 +179,7 @@ function toggleMute() {
         <button
           class="ctrl-btn play-btn"
           @click="player.togglePause()"
-          :disabled="s.state === 'stopped'"
+          :disabled="player.playlist.length === 0 && !s.track"
           :title="s.state === 'playing' ? t('common.pause') : t('common.play')"
         >
           <svg v-if="s.state === 'playing'" viewBox="0 0 24 24" class="play-svg">
@@ -161,7 +193,7 @@ function toggleMute() {
         <button
           class="ctrl-btn"
           @click="player.playNext()"
-          :disabled="s.state === 'stopped'"
+          :disabled="player.playlist.length === 0"
           :title="t('player.nextTrack')"
         >
           ⏭
@@ -182,7 +214,7 @@ function toggleMute() {
       <div
         class="progress-container"
         @click="onSeekClick"
-        :class="{ inactive: s.state === 'stopped' }"
+        :class="{ inactive: !s.durationSec }"
       >
         <span class="time-label">{{ formatTime(s.positionSec) }}</span>
         <div class="progress-bar">
@@ -508,5 +540,60 @@ function toggleMute() {
 }
 .volume-slider:hover::-moz-range-thumb {
   transform: scale(1.15);
+}
+
+/* Save Streamed Track */
+.save-stream-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text2);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  margin-left: 6px;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.save-stream-btn.can-save:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--accent);
+  border-color: rgba(29, 185, 84, 0.35);
+  transform: scale(1.12);
+}
+
+.save-stream-btn.is-saved {
+  color: var(--accent);
+  cursor: default;
+  opacity: 0.9;
+}
+
+.save-stream-btn.is-saving {
+  cursor: wait;
+}
+
+.btn-spinner {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+  font-size: 13px;
+}
+
+.btn-check {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.btn-save-icon {
+  font-size: 15px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 </style>

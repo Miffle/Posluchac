@@ -8,7 +8,9 @@ import {
   GetPlaylistTracks,
   AddToPlaylist,
   RemoveFromPlaylist,
-  GetPlaylistsForTrack
+  GetPlaylistsForTrack,
+  ImportPlaylist,
+  ExportPlaylist
 } from '../../wailsjs/go/main/App'
 
 export interface Playlist {
@@ -117,6 +119,34 @@ export const usePlaylistsStore = defineStore('playlists', () => {
     }
   }
 
+  async function importM3U(): Promise<Playlist | null> {
+    try {
+      const imported = await ImportPlaylist()
+      if (imported) {
+        await loadPlaylists()
+        await select(imported as Playlist)
+        showToast(t('playlists.toastImportedWithName', { name: imported.name }))
+        return imported as Playlist
+      }
+    } catch (e) {
+      console.error('Failed to import playlist', e)
+    }
+    return null
+  }
+
+  async function exportM3U(id: number): Promise<string | null> {
+    try {
+      const path = await ExportPlaylist(id)
+      if (path) {
+        showToast(t('playlists.toastExported'))
+        return path
+      }
+    } catch (e) {
+      console.error('Failed to export playlist', e)
+    }
+    return null
+  }
+
   return {
     playlists,
     selected,
@@ -130,6 +160,8 @@ export const usePlaylistsStore = defineStore('playlists', () => {
     addTrack,
     removeTrack,
     getPlaylistsForTrack,
-    showToast
+    showToast,
+    importM3U,
+    exportM3U
   }
 })
