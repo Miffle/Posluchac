@@ -186,6 +186,10 @@ export function RemoveLibraryFolder(arg1, arg2) {
   return window['go']['main']['App']['RemoveLibraryFolder'](arg1, arg2);
 }
 
+export function RemoveTorrent(arg1, arg2) {
+  return window['go']['main']['App']['RemoveTorrent'](arg1, arg2);
+}
+
 export function RemoveTorrentFileFromDownload(arg1, arg2) {
   return window['go']['main']['App']['RemoveTorrentFileFromDownload'](arg1, arg2);
 }

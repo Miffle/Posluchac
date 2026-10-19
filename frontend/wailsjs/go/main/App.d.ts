@@ -101,6 +101,8 @@ export function RemoveFromPlaylist(arg1:number,arg2:number):Promise<void>;
 
 export function RemoveLibraryFolder(arg1:number,arg2:boolean):Promise<void>;
 
+export function RemoveTorrent(arg1:string,arg2:boolean):Promise<void>;
+
 export function RemoveTorrentFileFromDownload(arg1:string,arg2:string):Promise<void>;
 
 export function ResumeTorrent(arg1:string):Promise<void>;

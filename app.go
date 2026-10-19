@@ -620,6 +620,11 @@ func (a *App) ResumeTorrent(infoHash string) error {
 	return a.engine.ResumeTorrent(infoHash)
 }
 
+// RemoveTorrent removes a torrent. deleteFiles=true also deletes local files.
+func (a *App) RemoveTorrent(infoHash string, deleteFiles bool) error {
+	return a.engine.RemoveTorrent(infoHash, deleteFiles)
+}
+
 // SpeedLimits holds bandwidth limitations in KB/s (0 = unlimited).
 type SpeedLimits struct {
 	DownloadKBps int `json:"downloadKBps"`
