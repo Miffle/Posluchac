@@ -843,6 +843,48 @@ func (a *App) ToggleFavourite(trackID int64) error {
 	return a.library.ToggleFavourite(trackID)
 }
 
+// UpdateTrackMetadata updates virtual metadata in SQLite and optionally writes ID3 tags to disk.
+func (a *App) UpdateTrackMetadata(trackID int64, title, artist, album string, year int, genre string, writeToFile bool) (*library.Track, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+
+	track, err := a.library.GetTrack(trackID)
+	if err != nil || track == nil {
+		return nil, fmt.Errorf("track not found")
+	}
+
+	title = strings.TrimSpace(title)
+	artist = strings.TrimSpace(artist)
+	album = strings.TrimSpace(album)
+	genre = strings.TrimSpace(genre)
+
+	// 1. Update virtual tags in SQLite database
+	if err := a.library.UpdateTrackMetadata(trackID, title, artist, album, year, genre); err != nil {
+		return nil, fmt.Errorf("update database: %w", err)
+	}
+
+	// 2. If requested, write tags directly to the physical audio file on disk
+	if writeToFile && track.FilePath != "" {
+		if _, statErr := os.Stat(track.FilePath); statErr == nil {
+			_ = metadata.WriteFileTags(track.FilePath, title, artist, album, year, genre)
+		}
+	}
+
+	// 3. If this track is currently playing in the audio player, update player's status & Discord RPC
+	st := a.player.Status()
+	if st.Track != nil && (st.Track.FilePath == track.FilePath || st.Track.FileName == track.FileName) {
+		st.Track.Title = title
+		st.Track.Artist = artist
+		st.Track.Album = album
+		if a.discord != nil && st.State == audio.StatePlaying {
+			go a.updateDiscordActivity(st.Track, st.PositionSec, st.DurationSec)
+		}
+	}
+
+	return a.library.GetTrack(trackID)
+}
+
 // ImportTrackToLibrary reads metadata from a torrent file and saves it to the library.
 func (a *App) ImportTrackToLibrary(infoHash, filePath string) (library.Track, error) {
 	r, err := a.engine.OpenFileReader(infoHash, filePath)
@@ -1304,6 +1346,11 @@ func (a *App) ScanLibrary() (int, error) {
 
 			fi, err := d.Info()
 			if err != nil || fi.Size() == 0 {
+				return nil
+			}
+
+			// If track is already indexed, keep existing (and potentially edited) metadata intact
+			if _, exists := existingByPath[path]; exists {
 				return nil
 			}
 

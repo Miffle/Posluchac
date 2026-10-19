@@ -291,6 +291,16 @@ func (l *DB) UpdateTrackCover(id int64, coverPath string) error {
 	return err
 }
 
+// UpdateTrackMetadata updates title, artist, album, year, and genre in the tracks table.
+func (l *DB) UpdateTrackMetadata(id int64, title, artist, album string, year int, genre string) error {
+	_, err := l.db.Exec(`
+		UPDATE tracks
+		SET title = ?, artist = ?, album = ?, year = ?, genre = ?
+		WHERE id = ?`,
+		title, artist, album, year, genre, id)
+	return err
+}
+
 // CreatePlaylist creates a new empty playlist.
 func (l *DB) CreatePlaylist(name string) (int64, error) {
 	res, err := l.db.Exec(`INSERT INTO playlists (name) VALUES (?)`, name)

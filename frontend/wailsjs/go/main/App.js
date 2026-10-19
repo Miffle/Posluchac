@@ -257,3 +257,7 @@ export function SyncSources() {
 export function ToggleFavourite(arg1) {
   return window['go']['main']['App']['ToggleFavourite'](arg1);
 }
+
+export function UpdateTrackMetadata(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
+  return window['go']['main']['App']['UpdateTrackMetadata'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
+}

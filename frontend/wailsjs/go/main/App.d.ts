@@ -136,3 +136,5 @@ export function Stop():Promise<void>;
 export function SyncSources():Promise<void>;
 
 export function ToggleFavourite(arg1:number):Promise<void>;
+
+export function UpdateTrackMetadata(arg1:number,arg2:string,arg3:string,arg4:string,arg5:number,arg6:string,arg7:boolean):Promise<library.Track>;

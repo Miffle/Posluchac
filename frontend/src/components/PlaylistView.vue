@@ -5,6 +5,7 @@ import { usePlayerStore } from '../store/player'
 import { useDialogStore } from '../store/dialog'
 import { useI18n } from '../i18n'
 import PlaylistAddTracksModal from './PlaylistAddTracksModal.vue'
+import EditMetadataModal from './EditMetadataModal.vue'
 
 const playlistsStore = usePlaylistsStore()
 const player = usePlayerStore()
@@ -12,6 +13,22 @@ const dialog = useDialogStore()
 const { t } = useI18n()
 const newName = ref('')
 const showAddModal = ref(false)
+const editingTrack = ref<any | null>(null)
+
+function openEditMetadata(track: any) {
+  editingTrack.value = track
+}
+
+function onMetadataSaved(updated: any) {
+  if (!updated) return
+  const found = playlistsStore.tracks.find(t => t.id === updated.id)
+  if (found) {
+    found.title = updated.title
+    found.artist = updated.artist
+    found.album = updated.album
+    found.genre = updated.genre
+  }
+}
 
 async function createPlaylist() {
   if (!newName.value.trim()) return
@@ -160,6 +177,13 @@ onMounted(() => {
               <div class="track-duration">{{ formatDuration(track.durationSec) }}</div>
               <div class="track-actions">
                 <button
+                  class="edit-btn"
+                  @click.stop="openEditMetadata(track)"
+                  :title="t('library.editMetadata')"
+                >
+                  🏷️
+                </button>
+                <button
                   class="play-btn"
                   :class="{ 'is-playing': isTrackPlaying(track) }"
                   @click.stop="handlePlayClick(track)"
@@ -185,6 +209,13 @@ onMounted(() => {
     <PlaylistAddTracksModal
       :playlist="showAddModal ? playlistsStore.selected : null"
       @close="showAddModal = false"
+    />
+
+    <!-- Modal to edit track metadata -->
+    <EditMetadataModal
+      :track="editingTrack"
+      @close="editingTrack = null"
+      @saved="onMetadataSaved"
     />
   </div>
 </template>
@@ -305,6 +336,20 @@ h1 { font-size: 24px; font-weight: 700; }
 .track-row:hover .play-btn { opacity: 1; }
 .track-row.playing .play-btn { opacity: 1; }
 .play-btn:hover { transform: scale(1.05); }
+
+.edit-btn {
+  opacity: 0;
+  font-size: 13px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text2);
+  transition: all 0.1s;
+}
+.track-row:hover .edit-btn { opacity: 0.8; }
+.edit-btn:hover { opacity: 1 !important; color: var(--accent); background: var(--surface2); }
 
 .del-btn {
   opacity: 0; font-size: 13px; padding: 2px 6px; border-radius: 4px;
