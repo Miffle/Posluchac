@@ -10,6 +10,8 @@ require (
 	github.com/mewkiz/flac v1.0.8
 	github.com/wailsapp/wails/v2 v2.16.0
 	golang.org/x/sys v0.46.0
+	golang.org/x/time v0.8.0
+	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	modernc.org/sqlite v1.33.1
 )
 
@@ -57,7 +59,6 @@ require (
 	github.com/hajimehoshi/go-mp3 v0.3.4 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect
-	github.com/hugolgst/rich-go v0.0.0-20240715122152-74618cc1ace2 // indirect
 	github.com/icza/bitio v1.1.0 // indirect
 	github.com/jchv/go-winloader v0.0.0-20210711035445-715c2860da7e // indirect
 	github.com/jfreymuth/oggvorbis v1.0.5 // indirect
@@ -117,8 +118,6 @@ require (
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/sync v0.21.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
-	golang.org/x/time v0.8.0 // indirect
-	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.55.3 // indirect

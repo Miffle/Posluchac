@@ -86,10 +86,6 @@ export function GetDiscordRPCEnabled() {
   return window['go']['main']['App']['GetDiscordRPCEnabled']();
 }
 
-export function SetDiscordRPCEnabled(arg1) {
-  return window['go']['main']['App']['SetDiscordRPCEnabled'](arg1);
-}
-
 export function GetDownloadDir() {
   return window['go']['main']['App']['GetDownloadDir']();
 }
@@ -130,10 +126,6 @@ export function GetTorrentSpeedLimits() {
   return window['go']['main']['App']['GetTorrentSpeedLimits']();
 }
 
-export function SetTorrentSpeedLimits(arg1, arg2) {
-  return window['go']['main']['App']['SetTorrentSpeedLimits'](arg1, arg2);
-}
-
 export function ImportPlaylist() {
   return window['go']['main']['App']['ImportPlaylist']();
 }
@@ -144,10 +136,6 @@ export function ImportTrackToLibrary(arg1, arg2) {
 
 export function IsCurrentTrackSaved() {
   return window['go']['main']['App']['IsCurrentTrackSaved']();
-}
-
-export function SaveCurrentStreamedTrack() {
-  return window['go']['main']['App']['SaveCurrentStreamedTrack']();
 }
 
 export function ListPlaylists() {
@@ -198,10 +186,6 @@ export function RemoveLibraryFolder(arg1, arg2) {
   return window['go']['main']['App']['RemoveLibraryFolder'](arg1, arg2);
 }
 
-export function RemoveTorrent(arg1, arg2) {
-  return window['go']['main']['App']['RemoveTorrent'](arg1, arg2);
-}
-
 export function RemoveTorrentFileFromDownload(arg1, arg2) {
   return window['go']['main']['App']['RemoveTorrentFileFromDownload'](arg1, arg2);
 }
@@ -212,6 +196,10 @@ export function ResumeTorrent(arg1) {
 
 export function RutrackerStatus() {
   return window['go']['main']['App']['RutrackerStatus']();
+}
+
+export function SaveCurrentStreamedTrack() {
+  return window['go']['main']['App']['SaveCurrentStreamedTrack']();
 }
 
 export function ScanLibrary() {
@@ -234,12 +222,20 @@ export function SeekTo(arg1) {
   return window['go']['main']['App']['SeekTo'](arg1);
 }
 
+export function SetDiscordRPCEnabled(arg1) {
+  return window['go']['main']['App']['SetDiscordRPCEnabled'](arg1);
+}
+
 export function SetRutrackerCookie(arg1) {
   return window['go']['main']['App']['SetRutrackerCookie'](arg1);
 }
 
 export function SetRutrackerMirror(arg1) {
   return window['go']['main']['App']['SetRutrackerMirror'](arg1);
+}
+
+export function SetTorrentSpeedLimits(arg1, arg2) {
+  return window['go']['main']['App']['SetTorrentSpeedLimits'](arg1, arg2);
 }
 
 export function SetVolume(arg1) {
