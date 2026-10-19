@@ -68,6 +68,15 @@ function formatBytes(bytes: number) {
   return (bytes / 1024 ** 3).toFixed(2) + ' GB'
 }
 
+function formatLimit(kbps: number) {
+  if (!kbps || kbps <= 0) return ''
+  if (kbps >= 1024) {
+    const mb = kbps / 1024
+    return (Number.isInteger(mb) ? mb : mb.toFixed(1)) + ' MB/s'
+  }
+  return kbps + ' KB/s'
+}
+
 function stateColor(state: string) {
   return { 
     downloading: '#2196f3', 
@@ -204,7 +213,12 @@ async function onDeleteTorrent(d: any) {
             👥 {{ d.leechers ?? 0 }} {{ t('downloads.leechersCount') }}
           </span>
 
-          <span v-if="d.downloadSpeed > 0" class="speed-dl">⬇ {{ formatBytes(d.downloadSpeed) }}/s</span>
+          <span v-if="d.downloadSpeed > 0" class="speed-dl">
+            ⬇ {{ formatBytes(d.downloadSpeed) }}/s
+            <span v-if="(d.downloadLimitKBps ?? 0) > 0" class="speed-limit-badge">
+              [{{ t('downloads.maxLimit') }} {{ formatLimit(d.downloadLimitKBps ?? 0) }}]
+            </span>
+          </span>
           <span
             v-if="d.uploadSpeed > 0 || d.state === 'seeding'"
             class="speed-ul"
@@ -212,6 +226,9 @@ async function onDeleteTorrent(d: any) {
             :title="d.state === 'seeding' && d.uploadSpeed === 0 ? t('downloads.seedingIdleTooltip') : undefined"
           >
             ⬆ {{ formatBytes(d.uploadSpeed) }}/s<span v-if="d.state === 'seeding' && d.uploadSpeed === 0" class="idle-tag"> ({{ t('downloads.idle') }})</span>
+            <span v-if="(d.uploadLimitKBps ?? 0) > 0" class="speed-limit-badge">
+              [{{ t('downloads.maxLimit') }} {{ formatLimit(d.uploadLimitKBps ?? 0) }}]
+            </span>
           </span>
         </div>
 
@@ -329,6 +346,7 @@ async function onDeleteTorrent(d: any) {
 .speed-ul { color: #4caf50; font-weight: 500; font-variant-numeric: tabular-nums; }
 .speed-ul.speed-idle { color: var(--text2); opacity: 0.8; }
 .idle-tag { font-size: 11px; opacity: 0.75; margin-left: 2px; }
+.speed-limit-badge { font-size: 11px; opacity: 0.75; margin-left: 3px; color: var(--text2); }
 .swarm-meta { display: inline-flex; align-items: center; gap: 5px; }
 .meta-sep { opacity: 0.4; margin: 0 1px; }
 

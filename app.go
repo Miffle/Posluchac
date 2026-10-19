@@ -604,9 +604,29 @@ func (a *App) ResumeTorrent(infoHash string) error {
 	return a.engine.ResumeTorrent(infoHash)
 }
 
-// RemoveTorrent removes a torrent. deleteFiles=true also deletes local files.
-func (a *App) RemoveTorrent(infoHash string, deleteFiles bool) error {
-	return a.engine.RemoveTorrent(infoHash, deleteFiles)
+// SpeedLimits holds bandwidth limitations in KB/s (0 = unlimited).
+type SpeedLimits struct {
+	DownloadKBps int `json:"downloadKBps"`
+	UploadKBps   int `json:"uploadKBps"`
+}
+
+// GetTorrentSpeedLimits returns the current download and upload speed limits in KB/s.
+func (a *App) GetTorrentSpeedLimits() SpeedLimits {
+	if a.engine == nil {
+		return SpeedLimits{}
+	}
+	dl, ul := a.engine.GetSpeedLimits()
+	return SpeedLimits{DownloadKBps: dl, UploadKBps: ul}
+}
+
+// SetTorrentSpeedLimits configures download and upload speed limits in KB/s (0 = unlimited).
+func (a *App) SetTorrentSpeedLimits(downloadKBps, uploadKBps int) error {
+	if a.engine == nil {
+		return fmt.Errorf("torrent engine not initialized")
+	}
+	a.engine.SetDownloadLimit(downloadKBps)
+	a.engine.SetUploadLimit(uploadKBps)
+	return nil
 }
 
 // ─── Playback ────────────────────────────────────────────────────────────────

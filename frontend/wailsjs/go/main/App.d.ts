@@ -59,6 +59,10 @@ export function GetProgress():Promise<Array<torrent.DownloadProgress>>;
 
 export function GetStatus():Promise<audio.Status>;
 
+export function GetTorrentSpeedLimits():Promise<main.SpeedLimits>;
+
+export function SetTorrentSpeedLimits(arg1:number,arg2:number):Promise<void>;
+
 export function ImportTrackToLibrary(arg1:string,arg2:string):Promise<library.Track>;
 
 export function ListPlaylists():Promise<Array<library.Playlist>>;

@@ -199,6 +199,20 @@ export namespace lyrics {
 
 export namespace main {
 	
+	export class SpeedLimits {
+	    downloadKBps: number;
+	    uploadKBps: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SpeedLimits(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.downloadKBps = source["downloadKBps"];
+	        this.uploadKBps = source["uploadKBps"];
+	    }
+	}
 	export class PendingTorrent {
 	    infoHash: string;
 	    name: string;
@@ -353,6 +367,8 @@ export namespace torrent {
 	    addedAt: number;
 	    selectedCount: number;
 	    selectedTrack?: string;
+	    downloadLimitKBps: number;
+	    uploadLimitKBps: number;
 	
 	    static createFrom(source: any = {}) {
 	        return new DownloadProgress(source);
@@ -374,6 +390,8 @@ export namespace torrent {
 	        this.addedAt = source["addedAt"];
 	        this.selectedCount = source["selectedCount"];
 	        this.selectedTrack = source["selectedTrack"];
+	        this.downloadLimitKBps = source["downloadLimitKBps"] ?? 0;
+	        this.uploadLimitKBps = source["uploadLimitKBps"] ?? 0;
 	    }
 	}
 	export class FileInfo {

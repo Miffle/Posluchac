@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useSettingsStore, type Language } from '../store/settings'
 import { useUpdaterStore } from '../store/updater'
 import { useI18n } from '../i18n'
@@ -9,9 +9,86 @@ const settings = useSettingsStore()
 const updater = useUpdaterStore()
 const { t } = useI18n()
 
-onMounted(() => {
+const customDlInput = ref('')
+const customUlInput = ref('')
+const isCustomDl = ref(false)
+const isCustomUl = ref(false)
+
+const dlPresets = computed(() => [
+  { value: 0, label: t('settings.unlimited') },
+  { value: 1024, label: '1 MB/s' },
+  { value: 2048, label: '2 MB/s' },
+  { value: 5120, label: '5 MB/s' },
+  { value: 10240, label: '10 MB/s' },
+])
+
+const ulPresets = computed(() => [
+  { value: 0, label: t('settings.unlimited') },
+  { value: 256, label: '256 KB/s' },
+  { value: 512, label: '512 KB/s' },
+  { value: 1024, label: '1 MB/s' },
+  { value: 2048, label: '2 MB/s' },
+])
+
+onMounted(async () => {
   settings.loadDownloadDir()
+  await settings.loadSpeedLimits()
+  syncCustomInputs()
 })
+
+function syncCustomInputs() {
+  const currentDl = settings.downloadLimitKBps
+  const isPresetDl = dlPresets.value.some(p => p.value === currentDl)
+  isCustomDl.value = !isPresetDl && currentDl > 0
+  if (isCustomDl.value) {
+    customDlInput.value = String(currentDl)
+  }
+
+  const currentUl = settings.uploadLimitKBps
+  const isPresetUl = ulPresets.value.some(p => p.value === currentUl)
+  isCustomUl.value = !isPresetUl && currentUl > 0
+  if (isCustomUl.value) {
+    customUlInput.value = String(currentUl)
+  }
+}
+
+async function selectDlPreset(val: number) {
+  isCustomDl.value = false
+  await settings.setSpeedLimits(val, settings.uploadLimitKBps)
+}
+
+function enableCustomDl() {
+  isCustomDl.value = true
+  if (!customDlInput.value && settings.downloadLimitKBps > 0) {
+    customDlInput.value = String(settings.downloadLimitKBps)
+  }
+}
+
+async function applyCustomDl() {
+  const val = parseInt(customDlInput.value, 10)
+  if (!isNaN(val) && val >= 0) {
+    await settings.setSpeedLimits(val, settings.uploadLimitKBps)
+  }
+}
+
+async function selectUlPreset(val: number) {
+  isCustomUl.value = false
+  await settings.setSpeedLimits(settings.downloadLimitKBps, val)
+}
+
+function enableCustomUl() {
+  isCustomUl.value = true
+  if (!customUlInput.value && settings.uploadLimitKBps > 0) {
+    customUlInput.value = String(settings.uploadLimitKBps)
+  }
+}
+
+async function applyCustomUl() {
+  const val = parseInt(customUlInput.value, 10)
+  if (!isNaN(val) && val >= 0) {
+    await settings.setSpeedLimits(settings.downloadLimitKBps, val)
+  }
+}
 
 const languages = computed<{ id: Language; flag: string; name: string; nativeName: string }[]>(() => [
   { id: 'ru', flag: '🇷🇺', name: t('settings.ru'), nativeName: t('settings.ruNative') },
@@ -89,7 +166,90 @@ function openGithub() {
         </div>
       </section>
 
-      <!-- 3. About Section -->
+      <!-- 3. BitTorrent Bandwidth Limits -->
+      <section class="settings-card">
+        <div class="card-header">
+          <div class="card-icon">⚡</div>
+          <div>
+            <h2 class="card-title">{{ t('settings.bandwidthTitle') }}</h2>
+            <p class="card-desc">{{ t('settings.bandwidthDesc') }}</p>
+          </div>
+        </div>
+
+        <div class="limits-group">
+          <!-- Download limit -->
+          <div class="limit-row">
+            <span class="limit-label">⬇ {{ t('settings.downloadLimit') }}</span>
+            <div class="preset-pills">
+              <button
+                v-for="p in dlPresets"
+                :key="p.value"
+                class="pill-btn"
+                :class="{ active: !isCustomDl && settings.downloadLimitKBps === p.value }"
+                @click="selectDlPreset(p.value)"
+              >
+                {{ p.label }}
+              </button>
+              <button
+                class="pill-btn"
+                :class="{ active: isCustomDl }"
+                @click="enableCustomDl"
+              >
+                {{ t('settings.customLimit') }}
+              </button>
+            </div>
+            <div class="custom-input-row" v-if="isCustomDl">
+              <input
+                type="number"
+                min="0"
+                v-model="customDlInput"
+                :placeholder="t('settings.customPlaceholder')"
+                class="custom-input"
+                @keyup.enter="applyCustomDl"
+              />
+              <span class="unit-label">KB/s</span>
+              <button class="action-btn-sm" @click="applyCustomDl">{{ t('common.save') }}</button>
+            </div>
+          </div>
+
+          <!-- Upload limit -->
+          <div class="limit-row">
+            <span class="limit-label">⬆ {{ t('settings.uploadLimit') }}</span>
+            <div class="preset-pills">
+              <button
+                v-for="p in ulPresets"
+                :key="p.value"
+                class="pill-btn"
+                :class="{ active: !isCustomUl && settings.uploadLimitKBps === p.value }"
+                @click="selectUlPreset(p.value)"
+              >
+                {{ p.label }}
+              </button>
+              <button
+                class="pill-btn"
+                :class="{ active: isCustomUl }"
+                @click="enableCustomUl"
+              >
+                {{ t('settings.customLimit') }}
+              </button>
+            </div>
+            <div class="custom-input-row" v-if="isCustomUl">
+              <input
+                type="number"
+                min="0"
+                v-model="customUlInput"
+                :placeholder="t('settings.customPlaceholder')"
+                class="custom-input"
+                @keyup.enter="applyCustomUl"
+              />
+              <span class="unit-label">KB/s</span>
+              <button class="action-btn-sm" @click="applyCustomUl">{{ t('common.save') }}</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. About Section -->
       <section class="settings-card">
         <div class="card-header">
           <div class="card-icon">ℹ️</div>
@@ -439,5 +599,95 @@ function openGithub() {
   color: #ff6b6b;
   border-radius: 6px;
   font-size: 13px;
+}
+
+.limits-group {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.limit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.limit-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.preset-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pill-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.pill-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #000;
+  font-weight: 600;
+}
+
+.custom-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.custom-input {
+  width: 130px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.custom-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.unit-label {
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.action-btn-sm {
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.action-btn-sm:hover {
+  opacity: 0.9;
 }
 </style>

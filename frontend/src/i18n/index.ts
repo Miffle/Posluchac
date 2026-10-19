@@ -33,6 +33,13 @@ export const translations = {
       githubRepo: 'GitHub Репозиторий',
       themeTitle: 'Внешний вид',
       themeDesc: 'Тёмная тема Posluchac оптимизирована для комфортного прослушивания',
+      bandwidthTitle: 'Сетевые ограничения BitTorrent',
+      bandwidthDesc: 'Ограничение максимальной скорости загрузки и отдачи торрентов',
+      downloadLimit: 'Ограничение скачивания',
+      uploadLimit: 'Ограничение отдачи',
+      unlimited: 'Без ограничений',
+      customLimit: 'Своё значение',
+      customPlaceholder: 'КБ/с',
     },
     player: {
       noTrack: 'Нет трека',
@@ -207,6 +214,7 @@ export const translations = {
       deleteConfirmTitle: 'Удаление загрузки',
       deleteConfirmMsg: 'Вы действительно хотите удалить эту загрузку?',
       deleteFilesCheckbox: 'Также удалить скачанные файлы с диска',
+      maxLimit: 'макс',
     },
     playlists: {
       title: 'Плейлисты',
@@ -313,6 +321,13 @@ export const translations = {
       githubRepo: 'GitHub Repository',
       themeTitle: 'Appearance',
       themeDesc: 'Posluchac dark theme is tuned for comfortable listening',
+      bandwidthTitle: 'BitTorrent Bandwidth Limits',
+      bandwidthDesc: 'Limit maximum download and upload speeds for torrents',
+      downloadLimit: 'Download limit',
+      uploadLimit: 'Upload limit',
+      unlimited: 'Unlimited',
+      customLimit: 'Custom value',
+      customPlaceholder: 'KB/s',
     },
     player: {
       noTrack: 'No track',
@@ -487,6 +502,7 @@ export const translations = {
       deleteConfirmTitle: 'Delete Download',
       deleteConfirmMsg: 'Are you sure you want to delete this download?',
       deleteFilesCheckbox: 'Also delete downloaded files from disk',
+      maxLimit: 'max',
     },
     playlists: {
       title: 'Playlists',

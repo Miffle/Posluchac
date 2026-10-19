@@ -102,6 +102,14 @@ export function GetStatus() {
   return window['go']['main']['App']['GetStatus']();
 }
 
+export function GetTorrentSpeedLimits() {
+  return window['go']['main']['App']['GetTorrentSpeedLimits']();
+}
+
+export function SetTorrentSpeedLimits(arg1, arg2) {
+  return window['go']['main']['App']['SetTorrentSpeedLimits'](arg1, arg2);
+}
+
 export function ImportTrackToLibrary(arg1, arg2) {
   return window['go']['main']['App']['ImportTrackToLibrary'](arg1, arg2);
 }
