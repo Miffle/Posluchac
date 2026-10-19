@@ -27,6 +27,7 @@ import (
 	"github.com/user/torrent-player/internal/sources"
 	torrentpkg "github.com/user/torrent-player/internal/torrent"
 	"github.com/user/torrent-player/internal/updater"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App holds all backend services and is bound to the Wails runtime.
@@ -843,6 +844,147 @@ func (a *App) GetPlaylistsForTrack(trackID int64) ([]int64, error) {
 		return nil, fmt.Errorf("library not initialized")
 	}
 	return a.library.GetPlaylistsForTrack(trackID)
+}
+
+// ExportPlaylist prompts the user to save the playlist to an .m3u8 file and writes it.
+func (a *App) ExportPlaylist(playlistID int64) (string, error) {
+	if a.library == nil {
+		return "", fmt.Errorf("library not initialized")
+	}
+	p, err := a.library.GetPlaylist(playlistID)
+	if err != nil {
+		return "", fmt.Errorf("playlist not found: %w", err)
+	}
+
+	defaultName := strings.TrimSpace(p.Name)
+	if defaultName == "" {
+		defaultName = "playlist"
+	}
+	reg := regexp.MustCompile(`[\\/:*?"<>|]`)
+	defaultName = reg.ReplaceAllString(defaultName, "_") + ".m3u8"
+
+	filePath, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Экспорт плейлиста / Export Playlist",
+		DefaultFilename: defaultName,
+		Filters: []runtime.FileFilter{
+			{DisplayName: "M3U8 Playlist (*.m3u8)", Pattern: "*.m3u8"},
+			{DisplayName: "M3U Playlist (*.m3u)", Pattern: "*.m3u"},
+		},
+	})
+	if err != nil || filePath == "" {
+		return "", err
+	}
+
+	content, err := a.library.ExportPlaylistM3U(playlistID)
+	if err != nil {
+		return "", fmt.Errorf("generate m3u: %w", err)
+	}
+
+	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+		return "", fmt.Errorf("write file: %w", err)
+	}
+
+	return filePath, nil
+}
+
+// ImportPlaylist prompts the user to pick an .m3u / .m3u8 file and imports it into a new playlist.
+func (a *App) ImportPlaylist() (*library.Playlist, error) {
+	if a.library == nil {
+		return nil, fmt.Errorf("library not initialized")
+	}
+	filePath, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Импорт плейлиста / Import Playlist",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Плейлисты (*.m3u, *.m3u8)", Pattern: "*.m3u;*.m3u8"},
+		},
+	})
+	if err != nil || filePath == "" {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read playlist file: %w", err)
+	}
+
+	baseName := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
+	if baseName == "" {
+		baseName = "Imported Playlist"
+	}
+
+	playlistID, err := a.library.CreatePlaylist(baseName)
+	if err != nil {
+		return nil, fmt.Errorf("create playlist: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var lastExtInfTitle string
+	var lastExtInfArtist string
+	position := 1
+	dir := filepath.Dir(filePath)
+
+	for _, rawLine := range lines {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "#EXTINF:") {
+			infoPart := strings.TrimPrefix(line, "#EXTINF:")
+			commaIdx := strings.Index(infoPart, ",")
+			if commaIdx != -1 {
+				trackName := strings.TrimSpace(infoPart[commaIdx+1:])
+				if dashIdx := strings.Index(trackName, " - "); dashIdx != -1 {
+					lastExtInfArtist = strings.TrimSpace(trackName[:dashIdx])
+					lastExtInfTitle = strings.TrimSpace(trackName[dashIdx+3:])
+				} else {
+					lastExtInfArtist = ""
+					lastExtInfTitle = trackName
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		trackFilePath := line
+		if !filepath.IsAbs(trackFilePath) {
+			trackFilePath = filepath.Join(dir, trackFilePath)
+		}
+
+		var matchedTrack *library.Track
+
+		// 1. Try exact path match in library
+		if t, err := a.library.GetTrackByPath(trackFilePath); err == nil && t != nil {
+			matchedTrack = t
+		}
+
+		// 2. If not in library, check if file exists on disk and import it
+		if matchedTrack == nil {
+			if fi, statErr := os.Stat(trackFilePath); statErr == nil && !fi.IsDir() {
+				if imported, impErr := a.ImportTrackToLibrary("", trackFilePath); impErr == nil {
+					matchedTrack = &imported
+				}
+			}
+		}
+
+		// 3. If file not on disk (different computer/path), match by artist/title
+		if matchedTrack == nil && (lastExtInfTitle != "" || lastExtInfArtist != "") {
+			if t, findErr := a.library.FindTrackByTitleArtist(lastExtInfTitle, lastExtInfArtist); findErr == nil && t != nil {
+				matchedTrack = t
+			}
+		}
+
+		if matchedTrack != nil {
+			_ = a.library.AddToPlaylist(playlistID, matchedTrack.ID, position)
+			position++
+		}
+
+		lastExtInfTitle = ""
+		lastExtInfArtist = ""
+	}
+
+	return a.library.GetPlaylist(playlistID)
 }
 
 // ─── Files and Folders ────────────────────────────────────────────────────────

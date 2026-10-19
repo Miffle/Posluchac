@@ -62,6 +62,10 @@ export function DownloadSelectedFiles(arg1, arg2) {
   return window['go']['main']['App']['DownloadSelectedFiles'](arg1, arg2);
 }
 
+export function ExportPlaylist(arg1) {
+  return window['go']['main']['App']['ExportPlaylist'](arg1);
+}
+
 export function GetAppVersion() {
   return window['go']['main']['App']['GetAppVersion']();
 }
@@ -108,6 +112,10 @@ export function GetTorrentSpeedLimits() {
 
 export function SetTorrentSpeedLimits(arg1, arg2) {
   return window['go']['main']['App']['SetTorrentSpeedLimits'](arg1, arg2);
+}
+
+export function ImportPlaylist() {
+  return window['go']['main']['App']['ImportPlaylist']();
 }
 
 export function ImportTrackToLibrary(arg1, arg2) {

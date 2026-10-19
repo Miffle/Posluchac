@@ -39,6 +39,8 @@ export function DeleteSource(arg1:number):Promise<void>;
 
 export function DownloadSelectedFiles(arg1:string,arg2:Array<string>):Promise<void>;
 
+export function ExportPlaylist(arg1:number):Promise<string>;
+
 export function GetAppVersion():Promise<string>;
 
 export function GetCover(arg1:string):Promise<string>;
@@ -62,6 +64,8 @@ export function GetStatus():Promise<audio.Status>;
 export function GetTorrentSpeedLimits():Promise<main.SpeedLimits>;
 
 export function SetTorrentSpeedLimits(arg1:number,arg2:number):Promise<void>;
+
+export function ImportPlaylist():Promise<library.Playlist>;
 
 export function ImportTrackToLibrary(arg1:string,arg2:string):Promise<library.Track>;
 

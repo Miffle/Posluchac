@@ -252,6 +252,10 @@ export const translations = {
       toastCreatedWithName: 'Плейлист «{name}» создан',
       toastAdded: 'Трек добавлен в «{name}»',
       toastRemoved: 'Трек убран из «{name}»',
+      importBtn: 'Импорт .m3u8',
+      exportBtn: 'Экспорт .m3u8',
+      toastImportedWithName: 'Плейлист «{name}» успешно импортирован',
+      toastExported: 'Плейлист успешно экспортирован в файл',
     },
     updater: {
       title: 'Доступно обновление',
@@ -540,6 +544,10 @@ export const translations = {
       toastCreatedWithName: 'Playlist "{name}" created',
       toastAdded: 'Track added to "{name}"',
       toastRemoved: 'Track removed from "{name}"',
+      importBtn: 'Import .m3u8',
+      exportBtn: 'Export .m3u8',
+      toastImportedWithName: 'Playlist "{name}" successfully imported',
+      toastExported: 'Playlist successfully exported to file',
     },
     updater: {
       title: 'Update Available',

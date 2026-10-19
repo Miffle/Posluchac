@@ -339,6 +339,82 @@ func (l *DB) DeletePlaylist(playlistID int64) error {
 	return err
 }
 
+// GetPlaylist returns a playlist with its tracks.
+func (l *DB) GetPlaylist(playlistID int64) (*Playlist, error) {
+	row := l.db.QueryRow(`SELECT id, name, created_at FROM playlists WHERE id = ?`, playlistID)
+	var p Playlist
+	if err := row.Scan(&p.ID, &p.Name, &p.CreatedAt); err != nil {
+		return nil, err
+	}
+	tracks, err := l.GetPlaylistTracks(playlistID)
+	if err == nil {
+		p.Tracks = tracks
+	}
+	return &p, nil
+}
+
+// ExportPlaylistM3U formats the playlist as Extended M3U text (UTF-8).
+func (l *DB) ExportPlaylistM3U(playlistID int64) (string, error) {
+	tracks, err := l.GetPlaylistTracks(playlistID)
+	if err != nil {
+		return "", err
+	}
+	var sb strings.Builder
+	sb.WriteString("#EXTM3U\n")
+	for _, t := range tracks {
+		duration := int(t.DurationSec)
+		if duration <= 0 {
+			duration = -1
+		}
+		displayName := t.Title
+		if displayName == "" {
+			displayName = t.FileName
+		}
+		if t.Artist != "" {
+			displayName = fmt.Sprintf("%s - %s", t.Artist, displayName)
+		}
+		sb.WriteString(fmt.Sprintf("#EXTINF:%d,%s\n", duration, displayName))
+		sb.WriteString(t.FilePath + "\n")
+	}
+	return sb.String(), nil
+}
+
+// FindTrackByTitleArtist searches for a track by artist and title in the local library.
+func (l *DB) FindTrackByTitleArtist(title, artist string) (*Track, error) {
+	title = strings.TrimSpace(title)
+	artist = strings.TrimSpace(artist)
+	if title == "" && artist == "" {
+		return nil, sql.ErrNoRows
+	}
+
+	var row *sql.Row
+	if title != "" && artist != "" {
+		row = l.db.QueryRow(`
+			SELECT id, info_hash, file_path, file_name, title, artist, album,
+			       year, genre, duration_sec, size_bytes, cover_path, favourite, added_at
+			FROM tracks
+			WHERE LOWER(title) = LOWER(?) AND LOWER(artist) = LOWER(?)
+			LIMIT 1`, title, artist)
+	} else if title != "" {
+		row = l.db.QueryRow(`
+			SELECT id, info_hash, file_path, file_name, title, artist, album,
+			       year, genre, duration_sec, size_bytes, cover_path, favourite, added_at
+			FROM tracks
+			WHERE LOWER(title) = LOWER(?) OR LOWER(file_name) LIKE LOWER(?)
+			LIMIT 1`, title, "%"+title+"%")
+	}
+	if row == nil {
+		return nil, sql.ErrNoRows
+	}
+	t := &Track{}
+	err := row.Scan(&t.ID, &t.InfoHash, &t.FilePath, &t.FileName, &t.Title, &t.Artist, &t.Album,
+		&t.Year, &t.Genre, &t.DurationSec, &t.SizeByes, &t.CoverPath, &t.Favourite, &t.AddedAt)
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
 // Close closes the database connection.
 func (l *DB) Close() error { return l.db.Close() }
 
