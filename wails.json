@@ -2,9 +2,9 @@
   "$schema": "https://wails.io/schemas/config.v2.json",
   "name": "Posluchac",
   "outputfilename": "Posluchac",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "info": {
-    "productVersion": "1.4.0"
+    "productVersion": "1.4.1"
   },
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
