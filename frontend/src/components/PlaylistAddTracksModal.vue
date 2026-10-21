@@ -1,6 +1,6 @@
 <script lang="ts" setup>
-import { ref, computed, onMounted } from 'vue'
-import { GetLibrary } from '../../wailsjs/go/main/App'
+import { ref, computed, watch, onMounted } from 'vue'
+import { GetLibrary, GetPlaylistTracks } from '../../wailsjs/go/main/App'
 import { usePlaylistsStore, Playlist } from '../store/playlists'
 import { useI18n } from '../i18n'
 
@@ -18,17 +18,25 @@ const allTracks = ref<any[]>([])
 const search = ref('')
 const addedTrackIds = ref<Set<number>>(new Set())
 
-onMounted(async () => {
+async function loadData() {
   try {
     const res = await GetLibrary()
     allTracks.value = res || []
-    // Pre-populate with tracks already in this playlist
-    const existing = playlistsStore.tracks.map(t => t.id)
-    addedTrackIds.value = new Set(existing)
+    if (props.playlist) {
+      const plTracks = await GetPlaylistTracks(props.playlist.id)
+      const existing = (plTracks || []).map((t: any) => t.id)
+      addedTrackIds.value = new Set(existing)
+    } else {
+      addedTrackIds.value = new Set()
+    }
   } catch (e) {
-    console.error('Failed to load library tracks', e)
+    console.error('Failed to load library or playlist tracks', e)
   }
-})
+}
+
+watch(() => props.playlist, () => {
+  loadData()
+}, { immediate: true })
 
 const filteredTracks = computed(() => {
   const q = search.value.trim().toLowerCase()
@@ -45,8 +53,12 @@ const filteredTracks = computed(() => {
 
 async function add(t: any) {
   if (!props.playlist || addedTrackIds.value.has(t.id)) return
-  await playlistsStore.addTrack(props.playlist.id, t.id, props.playlist.name)
-  addedTrackIds.value.add(t.id)
+  try {
+    await playlistsStore.addTrack(props.playlist.id, t.id, props.playlist.name)
+    addedTrackIds.value = new Set([...addedTrackIds.value, t.id])
+  } catch (e) {
+    console.error('Failed to add track to playlist', e)
+  }
 }
 
 function formatDuration(sec: number) {

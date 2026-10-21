@@ -207,7 +207,8 @@ onMounted(() => {
 
     <!-- Modal to add library tracks into this playlist -->
     <PlaylistAddTracksModal
-      :playlist="showAddModal ? playlistsStore.selected : null"
+      v-if="showAddModal && playlistsStore.selected"
+      :playlist="playlistsStore.selected"
       @close="showAddModal = false"
     />
 

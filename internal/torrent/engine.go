@@ -1597,9 +1597,7 @@ type FileInfo struct {
 func isAudioFile(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
 	audioExts := map[string]bool{
-		".mp3": true, ".flac": true, ".ogg": true,
-		".wav": true, ".aac": true, ".m4a": true,
-		".opus": true, ".ape": true, ".wv": true,
+		".mp3": true, ".flac": true, ".ogg": true, ".wav": true,
 	}
 	return audioExts[ext]
 }
