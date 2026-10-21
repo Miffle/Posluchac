@@ -311,7 +311,7 @@ func (p *Player) stopLocked() {
 	}
 	p.ctrl = nil
 	p.vol = nil
-	p.track = nil
+	// Retain p.track so metadata and cover art remain visible while stopped
 	p.state = StateStopped
 }
 

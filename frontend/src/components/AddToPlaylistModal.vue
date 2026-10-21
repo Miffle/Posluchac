@@ -61,6 +61,7 @@ async function handleToggle(p: Playlist) {
 </script>
 
 <template>
+  <Teleport to="body">
   <div class="modal-backdrop" v-if="track" @click.self="emit('close')">
     <div class="modal-card">
       <div class="modal-header">
@@ -130,6 +131,7 @@ async function handleToggle(p: Playlist) {
       </div>
     </div>
   </div>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -141,7 +143,7 @@ async function handleToggle(p: Playlist) {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 10000;
   padding: 20px;
 }
 

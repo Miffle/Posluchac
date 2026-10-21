@@ -710,7 +710,11 @@ func (a *App) PlayTrack(infoHash, filePath string) error {
 		}
 	}
 
-	ext := filepath.Ext(filePath)
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if !isAudioExtension(filePath) {
+		_ = r.Close()
+		return fmt.Errorf("формат файла %s не поддерживается (поддерживаются MP3, FLAC, OGG, WAV)", ext)
+	}
 
 	coverPath := ""
 	var title, artist, album string
@@ -1346,6 +1350,11 @@ func (a *App) ScanLibrary() (int, error) {
 					continue
 				}
 
+				if !isAudioExtension(t.FilePath) {
+					_ = a.library.DeleteTrack(t.ID)
+					continue
+				}
+
 				// Backfill missing duration using the player decoder
 				if t.DurationSec <= 0 {
 					if dur := audio.GetFileDuration(t.FilePath); dur > 0 {
@@ -1675,8 +1684,7 @@ func findCoverInDir(dir string) string {
 
 func isAudioExtension(path string) bool {
 	ext := strings.ToLower(filepath.Ext(path))
-	return ext == ".mp3" || ext == ".flac" || ext == ".ogg" || ext == ".wav" ||
-		ext == ".m4a" || ext == ".aac" || ext == ".opus" || ext == ".ape" || ext == ".wv"
+	return ext == ".mp3" || ext == ".flac" || ext == ".ogg" || ext == ".wav"
 }
 
 // ─── Auto-Updater ────────────────────────────────────────────────────────────

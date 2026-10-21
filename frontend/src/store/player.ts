@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { GetStatus, Pause, Stop, SeekTo, SetVolume, PlayTrack, IsCurrentTrackSaved, SaveCurrentStreamedTrack } from '../../wailsjs/go/main/App'
 import { EventsOn } from '../../wailsjs/runtime/runtime'
+import { useDialogStore } from './dialog'
 
 export interface PlayerStatus {
   state: 'playing' | 'paused' | 'stopped'
@@ -146,6 +147,7 @@ export const usePlayerStore = defineStore('player', () => {
         const trackChanged = (s.track?.filePath !== status.value.track?.filePath) || (s.track?.infoHash !== status.value.track?.infoHash)
         status.value = {
           ...s,
+          track: s.track || status.value.track,
           volume: status.value.volume
         }
 
@@ -169,11 +171,18 @@ export const usePlayerStore = defineStore('player', () => {
       if (repeatMode.value === 'one' && status.value.track) {
         // Repeat same song
         await PlayTrack(status.value.track.infoHash, status.value.track.filePath)
-      } else if (repeatMode.value === 'all' || isShuffled.value) {
-        // Repeat playlist or shuffle: play next
+      } else if (repeatMode.value === 'all') {
+        // Repeat entire playlist (shuffled or sequential)
         await playNext()
-      } else if (currentIndex.value < playlist.value.length - 1) {
-        // Play next song until end of list
+      } else if (isShuffled.value) {
+        // Shuffle mode with repeat OFF: only continue if there are unplayed tracks left
+        if (unplayedIndices.value.length > 0) {
+          await playNext()
+        } else {
+          await stop()
+        }
+      } else if (currentIndex.value >= 0 && currentIndex.value < playlist.value.length - 1) {
+        // Sequential, repeat OFF: play next song until end of list
         await playNext()
       } else {
         // Reached end of playback queue: cleanly stop and reset
@@ -193,13 +202,14 @@ export const usePlayerStore = defineStore('player', () => {
   async function play(infoHash: string, filePath: string, queue?: QueueTrack[]) {
     if (queue && queue.length > 0) {
       playlist.value = queue
-      currentIndex.value = queue.findIndex(t => t.filePath === filePath)
+      const idx = queue.findIndex(t => t.filePath === filePath || (t.infoHash === infoHash && t.fileName === filePath))
+      currentIndex.value = idx !== -1 ? idx : 0
       shuffleHistory.value = []
       if (isShuffled.value) {
         initShufflePool(currentIndex.value)
       }
     } else {
-      const idx = playlist.value.findIndex(t => t.filePath === filePath)
+      const idx = playlist.value.findIndex(t => t.filePath === filePath || (t.infoHash === infoHash && t.fileName === filePath))
       if (idx !== -1) {
         currentIndex.value = idx
       } else {
@@ -211,12 +221,26 @@ export const usePlayerStore = defineStore('player', () => {
         initShufflePool(currentIndex.value)
       }
     }
-    await PlayTrack(infoHash, filePath)
+    try {
+      await PlayTrack(infoHash, filePath)
+    } catch (err: any) {
+      const msg = err?.message || String(err)
+      console.warn('PlayTrack error:', msg)
+      try {
+        const dialog = useDialogStore()
+        dialog.toast(msg, 'warning')
+      } catch { /* ignore */ }
+      status.value.state = 'stopped'
+    }
   }
 
   async function playNext() {
     if (playlist.value.length === 0) return
     if (playlist.value.length === 1) {
+      if (repeatMode.value === 'off') {
+        await stop()
+        return
+      }
       currentIndex.value = 0
       const track = playlist.value[0]
       await PlayTrack(track.infoHash, track.filePath)
@@ -233,9 +257,14 @@ export const usePlayerStore = defineStore('player', () => {
       // Filter unplayed pool to valid bounds
       unplayedIndices.value = unplayedIndices.value.filter(i => i >= 0 && i < playlist.value.length && i !== currentIndex.value)
 
-      // When pool is exhausted, re-fill with all tracks except current (start new non-repeating cycle)
+      // When pool is exhausted:
       if (unplayedIndices.value.length === 0) {
-        initShufflePool(currentIndex.value)
+        if (repeatMode.value === 'all') {
+          initShufflePool(currentIndex.value)
+        } else {
+          await stop()
+          return
+        }
       }
 
       if (unplayedIndices.value.length > 0) {
@@ -244,6 +273,12 @@ export const usePlayerStore = defineStore('player', () => {
         nextIdx = (currentIndex.value + 1) % playlist.value.length
       }
     } else {
+      if (currentIndex.value >= playlist.value.length - 1) {
+        if (repeatMode.value === 'off') {
+          await stop()
+          return
+        }
+      }
       nextIdx = (currentIndex.value + 1) % playlist.value.length
     }
 
