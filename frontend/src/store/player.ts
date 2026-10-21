@@ -147,6 +147,7 @@ export const usePlayerStore = defineStore('player', () => {
         const trackChanged = (s.track?.filePath !== status.value.track?.filePath) || (s.track?.infoHash !== status.value.track?.infoHash)
         status.value = {
           ...s,
+          track: s.track || status.value.track,
           volume: status.value.volume
         }
 

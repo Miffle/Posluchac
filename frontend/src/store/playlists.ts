@@ -63,6 +63,10 @@ export const usePlaylistsStore = defineStore('playlists', () => {
     if (!trimmed) return 0
     const id = await CreatePlaylist(trimmed)
     await loadPlaylists()
+    const created = playlists.value.find(p => p.id === id)
+    if (created) {
+      await select(created)
+    }
     showToast(t('playlists.toastCreatedWithName', { name: trimmed }))
     return id
   }

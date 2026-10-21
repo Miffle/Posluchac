@@ -72,6 +72,10 @@ const displayArtist = computed(() => {
   return ''
 })
 
+const displayCover = computed(() => {
+  return s.value.track?.coverPath || player.currentQueueTrack?.coverPath || ''
+})
+
 const volumePercent = computed(() => {
   const v = s.value.volume ?? 0.8
   return Math.min(100, Math.max(0, Math.round(v * 100)))
@@ -112,8 +116,8 @@ async function handleSaveTrack() {
         tabindex="0"
       >
         <img
-          v-if="s.track?.coverPath"
-          :src="'/api/cover?path=' + encodeURIComponent(s.track.coverPath)"
+          v-if="displayCover"
+          :src="'/api/cover?path=' + encodeURIComponent(displayCover)"
           class="track-cover-img"
           alt="Cover"
           @error="($event.target as HTMLElement).style.display = 'none'"
